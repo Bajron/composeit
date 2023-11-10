@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "composeit"
+version = "0.0.1"
+authors = [
+    {name = "Błażej Kramarski", email = "b.kramarski@gmail.com"},
+]
+description = "My package description"
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["compose", "process"]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "pyyaml",
+]
+#dynamic = ["version"]
+
+[project.scripts]
+composeit = "composeit.compose:main"
