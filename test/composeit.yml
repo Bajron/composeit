@@ -1,0 +1,9 @@
+services:
+  echo_service:
+    command: echo
+    args:
+      - foo
+      - bar
+    shell: true
+  ping_service:
+    command: ping

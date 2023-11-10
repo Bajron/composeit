@@ -19,7 +19,14 @@ classifiers = [
 dependencies = [
     "pyyaml",
 ]
+[project.optional-dependencies]
+dev = [
+    "black"
+]
 #dynamic = ["version"]
 
 [project.scripts]
 composeit = "composeit.compose:main"
+
+[tool.black]
+line-length = 120
