@@ -5,6 +5,10 @@ import subprocess
 import asyncio
 import signal
 import os
+from termcolor import colored
+import termcolor
+
+USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
 
 
 def main():
@@ -44,9 +48,15 @@ def start(file: pathlib.Path):
     asyncio.run(watch_services(parsed_data))
 
 
-async def watch_services(f):
+async def watch_services(compose_config, use_color=True):
     try:
-        services = [await make_process(name, s) for name, s in f["services"].items()]
+        if use_color and os.name == "nt":
+            os.system("color")
+
+        services = [
+            await make_process(i, name, service_config, use_color)
+            for (i, (name, service_config)) in enumerate(compose_config["services"].items())
+        ]
 
         def shutdown_action():
             print(" *** Calling terminate on sub processes")
@@ -67,8 +77,8 @@ async def watch_services(f):
             s.terminate()
 
 
-async def make_process(name, s):
-    if s.get("inherit_environment", True):
+async def make_process(sequence, name, service_config, use_color):
+    if service_config.get("inherit_environment", True):
         env = None
     else:
         # TODO: minimal viable env
@@ -77,10 +87,10 @@ async def make_process(name, s):
         else:
             env = {}
 
-    if "environment" in s:
+    if "environment" in service_config:
         if env is None:
             env = os.environ.copy()
-        env_definition = s["environment"]
+        env_definition = service_config["environment"]
         if isinstance(env_definition, list):
             splits = [e.split("=", 1) for e in env_definition]
             to_add = {s[0]: s[1] if len(s) == 2 else os.environ.get(s[0], "") for s in splits}
@@ -90,36 +100,51 @@ async def make_process(name, s):
 
     popen_kw = {"env": env}
 
-    if s.get("shell", False):
+    if service_config.get("shell", False):
         # TODO, injections?
-        if "args" in s:
+        if "args" in service_config:
             print(" ** args ignored with a shell command")
         process = await asyncio.create_subprocess_shell(
-            cmd=s["command"], stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
+            cmd=service_config["command"], stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
         )
     else:
-        command = s["command"] if isinstance(s["command"], list) else [s["command"]]
-        command.extend(s.get("args", []))
+        command = (
+            service_config["command"] if isinstance(service_config["command"], list) else [service_config["command"]]
+        )
+        command.extend(service_config.get("args", []))
         process = await asyncio.create_subprocess_exec(
             *command, stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
         )
-    return AsyncProcess(name, s, process)
+    return AsyncProcess(sequence, name, service_config, process, use_color)
 
 
 class AsyncProcess:
-    def __init__(self, name, s, process: asyncio.subprocess.Process):
+    def __init__(
+        self, sequence: int, name: str, service_config: dict, process: asyncio.subprocess.Process, use_color: bool
+    ):
+        self.sequence = sequence
         self.name = name
-        self.definition = s
+        self.definition = service_config
         self.process = process
+        self.use_color = use_color
+
+        self.color = USABLE_COLORS[self.sequence % len(USABLE_COLORS)]
+
         self.rc = None
+
+    def _output(self, sep: str, message: str):
+        s = f"{self.name}{sep} {message}"
+        if self.use_color:
+            s = colored(s, self.color)
+        print(s, end="")
 
     async def watch_stderr(self):
         async for l in self.process.stderr:
-            print(f"{self.name}> {l.decode()}", end="")
+            self._output(">", l.decode())
 
     async def watch_stdout(self):
         async for l in self.process.stdout:
-            print(f"{self.name}: {l.decode()}", end="")
+            self._output(":", l.decode())
 
     async def wait_for_code(self):
         self.rc = await self.process.wait()
