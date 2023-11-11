@@ -5,5 +5,13 @@ services:
       - foo
       - bar
     shell: true
-  ping_service:
+  ping_service1:
     command: ping
+    args:
+      - "-t"
+      - "onet.pl"
+  ping_service2:
+    command: ping
+    args:
+      - "-t"
+      - "wp.pl"
