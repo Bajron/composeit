@@ -2,11 +2,21 @@ import yaml
 import argparse
 import pathlib
 import subprocess
-import sys
-import time
-import io
 import asyncio
 import signal
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="composeit",
+        description="Start services defined in file",
+    )
+    parser.add_argument("-f", "--file", type=pathlib.Path)
+
+    options = parser.parse_args()
+    print(options)
+
+    start(options.file)
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
@@ -23,65 +33,37 @@ class UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-class Process:
-    def __init__(self, name, s):
-        self.name = name
-        self.definition = s
-        self.process = subprocess.Popen(
-            # executable=s["command"],
-            args=([s["command"]] + s.get("args", [])),
-            shell=s.get("shell", False),
-            stderr=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-        )
-        self.rc = None
-        self.stderr = io.TextIOWrapper(self.process.stderr, line_buffering=True)
-        self.stdout = io.TextIOWrapper(self.process.stdout, line_buffering=True)
+def start(file: pathlib.Path, with_threads=False):
+    # parsed_data = yaml.safe_load(file.open())
+    parsed_data = yaml.load(file.open(), Loader=UniqueKeyLoader)
+    for s in parsed_data["services"]:
+        print(s)
+        print(parsed_data["services"][s])
 
-    def update(self):
-        if self.rc is not None:
-            return self.rc
-
-        # This is blocking, put it in threads?
-        for l in self.stderr.readlines():
-            print(f"{self.name}> {l}", end="")
-        for l in self.stdout.readlines():
-            print(f"{self.name}: {l}", end="")
-
-        self.rc = self.process.poll()
-        if self.rc is not None:
-            print(f" ** {self.definition['command']} finished with error code {self.rc}")
-            return self.rc
-        return self.rc
-
-    def finished(self):
-        return self.process.poll() is not None
-
-    def terminate(self):
-        return self.process.terminate()
+    asyncio.run(watch_services(parsed_data))
 
 
-def watch_services_with_threads(f):
+async def watch_services(f):
     try:
-        services = [Process(name, s) for name, s in f["services"].items()]
-        while not all([s.update() is not None for s in services]):
-            time.sleep(0.1)
+        services = [await make_process(name, s) for name, s in f["services"].items()]
+
+        def shutdown_action():
+            print(" *** Calling terminate on sub processes")
+            for s in services:
+                s.terminate()
+
+        def signal_handler(signal, frame):
+            asyncio.get_event_loop().call_soon_threadsafe(shutdown_action)
+
+        signal.signal(signal.SIGINT, signal_handler)
+
+        # Well, this is not implemented for Windows
+        # asyncio.get_event_loop().add_signal_handler(signal.SIGINT, signal_handler)
+
+        await asyncio.gather(*[s.watch() for s in services])
     finally:
         for s in services:
             s.terminate()
-
-
-def start(file: pathlib.Path, with_threads=False):
-    # f = yaml.safe_load(file.open())
-    f = yaml.load(file.open(), Loader=UniqueKeyLoader)
-    for s in f["services"]:
-        print(s)
-        print(f["services"][s])
-
-    if with_threads:
-        watch_services_with_threads(f)
-    else:
-        asyncio.run(watch_services(f))
 
 
 async def make_process(name, s):
@@ -126,36 +108,6 @@ class AsyncProcess:
     def terminate(self):
         if self.rc is None:
             self.process.terminate()
-
-
-async def watch_services(f):
-    try:
-        services = [await make_process(name, s) for name, s in f["services"].items()]
-
-        def signal_handler(signal, frame):
-            print(" *** Calling terminate on sub processes")
-            for s in services:
-                s.terminate()
-
-        signal.signal(signal.SIGINT, signal_handler)
-
-        await asyncio.gather(*[s.watch() for s in services])
-    finally:
-        for s in services:
-            s.terminate()
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        prog="composeit",
-        description="Start services defined in file",
-    )
-    parser.add_argument("-f", "--file", type=pathlib.Path)
-
-    options = parser.parse_args()
-    print(options)
-
-    start(options.file)
 
 
 if __name__ == "main":
