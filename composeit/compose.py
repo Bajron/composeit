@@ -77,47 +77,6 @@ async def watch_services(compose_config, use_color=True):
             s.terminate()
 
 
-async def make_process(service_config):
-    if service_config.get("inherit_environment", True):
-        env = None
-    else:
-        # TODO: minimal viable env
-        if os.name == "nt":
-            env = {"SystemRoot": os.environ.get("SystemRoot", "")}
-        else:
-            env = {}
-
-    if "environment" in service_config:
-        if env is None:
-            env = os.environ.copy()
-        env_definition = service_config["environment"]
-        if isinstance(env_definition, list):
-            splits = [e.split("=", 1) for e in env_definition]
-            to_add = {s[0]: s[1] if len(s) == 2 else os.environ.get(s[0], "") for s in splits}
-        if isinstance(env_definition, dict):
-            to_add = env_definition
-        env.update(to_add)
-
-    popen_kw = {"env": env}
-
-    if service_config.get("shell", False):
-        # TODO, injections?
-        if "args" in service_config:
-            print(" ** args ignored with a shell command")
-        process = await asyncio.create_subprocess_shell(
-            cmd=service_config["command"], stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
-        )
-    else:
-        command = (
-            service_config["command"] if isinstance(service_config["command"], list) else [service_config["command"]]
-        )
-        command.extend(service_config.get("args", []))
-        process = await asyncio.create_subprocess_exec(
-            *command, stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
-        )
-    return process
-
-
 RestartPolicyOptions = ["no", "always", "on-failure", "unless-stopped"]
 
 
@@ -126,7 +85,7 @@ class AsyncProcess:
         self.sequence = sequence
         self.name = name
         self.service_config = service_config
-        self.process_initialization = make_process(self.service_config)
+        self.process_initialization = AsyncProcess._make_process(self.service_config)
         self.process: asyncio.subprocess.Process = None
         self.use_color = use_color
         self.restart = service_config.get("restart", "no")
@@ -137,6 +96,59 @@ class AsyncProcess:
         self.rc = None
         self.terminated = False
         self.exception = None
+
+    async def _make_process(service_config):
+        if service_config.get("inherit_environment", True):
+            env = None
+        else:
+            # TODO: minimal viable env
+            if os.name == "nt":
+                env = {"SystemRoot": os.environ.get("SystemRoot", "")}
+            else:
+                env = {}
+
+        if "environment" in service_config:
+            if env is None:
+                env = os.environ.copy()
+            env_definition = service_config["environment"]
+            if isinstance(env_definition, list):
+                splits = [e.split("=", 1) for e in env_definition]
+                to_add = {s[0]: s[1] if len(s) == 2 else os.environ.get(s[0], "") for s in splits}
+            if isinstance(env_definition, dict):
+                to_add = env_definition
+            env.update(to_add)
+
+        popen_kw = {"env": env}
+
+        if "working_dir" in service_config:
+            popen_kw["cwd"] = service_config["working_dir"]
+
+        passthrough = ["user", "group", "extra_groups", "umask"]
+        for pt in passthrough:
+            if pt in service_config:
+                popen_kw[pt] = service_config[pt]
+
+        if service_config.get("shell", False):
+            # TODO, injections?
+            if "args" in service_config:
+                print(" ** args ignored with a shell command")
+            process = await asyncio.create_subprocess_shell(
+                cmd=service_config["command"],
+                stderr=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                **popen_kw,
+            )
+        else:
+            command = (
+                service_config["command"]
+                if isinstance(service_config["command"], list)
+                else [service_config["command"]]
+            )
+            command.extend(service_config.get("args", []))
+            process = await asyncio.create_subprocess_exec(
+                *command, stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
+            )
+        return process
 
     async def started(self):
         self.process = await self.process_initialization
@@ -186,7 +198,7 @@ class AsyncProcess:
     async def _restart(self):
         self.rc = None
         self.process = None
-        self.process_initialization = make_process(self.service_config)
+        self.process_initialization = AsyncProcess._make_process(self.service_config)
 
     def terminate(self):
         self.terminated = True
