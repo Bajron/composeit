@@ -1,17 +1,23 @@
 services:
   echo_service:
-    command: echo
-    args:
-      - foo
-      - bar
+    command: echo foo bar %TEST1%
     shell: true
+    inherit_environment: false
+    environment:
+      TEST1: test1
+  echo_service2:
+    command: echo foo bar %TEST2%
+    shell: true
+    environment:
+      - TEST2=test2
+      - PATH
+    
   ping_service1:
     command: ping
     args:
       - "-t"
       - "onet.pl"
+
   ping_service2:
-    command: ping
-    args:
-      - "-t"
-      - "wp.pl"
+    inherit_environment: false
+    command: [ping, -t, wp.pl]

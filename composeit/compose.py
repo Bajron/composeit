@@ -4,6 +4,7 @@ import pathlib
 import subprocess
 import asyncio
 import signal
+import os
 
 
 def main():
@@ -33,7 +34,7 @@ class UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-def start(file: pathlib.Path, with_threads=False):
+def start(file: pathlib.Path):
     # parsed_data = yaml.safe_load(file.open())
     parsed_data = yaml.load(file.open(), Loader=UniqueKeyLoader)
     for s in parsed_data["services"]:
@@ -67,18 +68,40 @@ async def watch_services(f):
 
 
 async def make_process(name, s):
+    if s.get("inherit_environment", True):
+        env = None
+    else:
+        # TODO: minimal viable env
+        if os.name == "nt":
+            env = {"SystemRoot": os.environ.get("SystemRoot", "")}
+        else:
+            env = {}
+
+    if "environment" in s:
+        if env is None:
+            env = os.environ.copy()
+        env_definition = s["environment"]
+        if isinstance(env_definition, list):
+            splits = [e.split("=", 1) for e in env_definition]
+            to_add = {s[0]: s[1] if len(s) == 2 else os.environ.get(s[0], "") for s in splits}
+        if isinstance(env_definition, dict):
+            to_add = env_definition
+        env.update(to_add)
+
+    popen_kw = {"env": env}
+
     if s.get("shell", False):
         # TODO, injections?
+        if "args" in s:
+            print(" ** args ignored with a shell command")
         process = await asyncio.create_subprocess_shell(
-            cmd=" ".join([s["command"]] + s.get("args", [])),
-            stderr=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
+            cmd=s["command"], stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
         )
     else:
+        command = s["command"] if isinstance(s["command"], list) else [s["command"]]
+        command.extend(s.get("args", []))
         process = await asyncio.create_subprocess_exec(
-            *([s["command"]] + s.get("args", [])),
-            stderr=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
+            *command, stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
         )
     return AsyncProcess(name, s, process)
 
