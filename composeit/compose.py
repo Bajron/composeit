@@ -54,7 +54,7 @@ async def watch_services(compose_config, use_color=True):
             os.system("color")
 
         services = [
-            await make_process(i, name, service_config, use_color)
+            AsyncProcess(i, name, service_config, use_color)
             for (i, (name, service_config)) in enumerate(compose_config["services"].items())
         ]
 
@@ -77,7 +77,7 @@ async def watch_services(compose_config, use_color=True):
             s.terminate()
 
 
-async def make_process(sequence, name, service_config, use_color):
+async def make_process(service_config):
     if service_config.get("inherit_environment", True):
         env = None
     else:
@@ -115,22 +115,31 @@ async def make_process(sequence, name, service_config, use_color):
         process = await asyncio.create_subprocess_exec(
             *command, stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
         )
-    return AsyncProcess(sequence, name, service_config, process, use_color)
+    return process
+
+
+RestartPolicyOptions = ["no", "always", "on-failure", "unless-stopped"]
 
 
 class AsyncProcess:
-    def __init__(
-        self, sequence: int, name: str, service_config: dict, process: asyncio.subprocess.Process, use_color: bool
-    ):
+    def __init__(self, sequence: int, name: str, service_config: dict, use_color: bool):
         self.sequence = sequence
         self.name = name
-        self.definition = service_config
-        self.process = process
+        self.service_config = service_config
+        self.process_initialization = make_process(self.service_config)
+        self.process: asyncio.subprocess.Process = None
         self.use_color = use_color
+        self.restart = service_config.get("restart", "no")
+        assert self.restart in RestartPolicyOptions
 
         self.color = USABLE_COLORS[self.sequence % len(USABLE_COLORS)]
 
         self.rc = None
+        self.terminated = False
+        self.exception = None
+
+    async def started(self):
+        self.process = await self.process_initialization
 
     def _output(self, sep: str, message: str):
         s = f"{self.name}{sep} {message}"
@@ -149,12 +158,39 @@ class AsyncProcess:
     async def wait_for_code(self):
         self.rc = await self.process.wait()
 
+    async def _resolve_restart(self):
+        if self.restart == "always" and not self.terminated:
+            await self._restart()
+        elif self.restart == "unless-stopped" and not self.terminated:
+            # TODO this would make more sense with side control and daemon mode
+            await self._restart()
+        elif self.restart == "on-failure" and self.rc != 0:
+            await self._restart()
+        else:
+            return False
+        return True
+
     async def watch(self):
-        await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
-        print(f" ** {self.definition['command']} finished with error code {self.rc}")
+        while True:
+            try:
+                await self.started()
+                await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
+                print(f" ** {self.service_config['command']} finished with error code {self.rc}")
+                if not await self._resolve_restart():
+                    break
+            except FileNotFoundError as ex:
+                print(f" ** Error running command {self.name} {ex}")
+                self.exception = ex
+                break
+
+    async def _restart(self):
+        self.rc = None
+        self.process = None
+        self.process_initialization = make_process(self.service_config)
 
     def terminate(self):
-        if self.rc is None:
+        self.terminated = True
+        if self.rc is None and self.process is not None:
             self.process.terminate()
 
 

@@ -1,17 +1,18 @@
 services:
   echo_service:
-    command: echo foo bar %TEST1%
+    command: "echo foo bar %TEST1% && pause"
     shell: true
     inherit_environment: false
     environment:
       TEST1: test1
+    restart: always
   echo_service2:
     command: echo foo bar %TEST2%
     shell: true
     environment:
       - TEST2=test2
       - PATH
-    
+
   ping_service1:
     command: ping
     args:
@@ -21,3 +22,13 @@ services:
   ping_service2:
     inherit_environment: false
     command: [ping, -t, wp.pl]
+
+  ping_service3:
+    command: ping google.pl
+    shell: true
+    restart: on-failure
+
+  ping_service4:
+    command: ping google.com
+    shell: true
+    restart: always
