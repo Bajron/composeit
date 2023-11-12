@@ -5,6 +5,7 @@ import subprocess
 import asyncio
 import signal
 import os
+import sys
 import logging
 from termcolor import colored
 import termcolor
@@ -15,23 +16,100 @@ from aiohttp import web, ClientConnectorError
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
 
 
-logging.basicConfig(level=logging.DEBUG)
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="composeit",
-        description="Start services defined in file",
+        description="Define and run applications",
     )
-    parser.add_argument("-f", "--file", type=pathlib.Path)
+    cfg_log = logging.getLogger("config")
+    parser.add_argument("-f", "--file", default=None, type=pathlib.Path, help="Compose configuration file")
+    parser.add_argument("-p", "--project-name", default=None, type=str, help="Project name")
+    parser.add_argument("--project-directory", default=None, type=pathlib.Path, help="Alternate working directory")
+    parser.add_argument("--env-file", default=[], action="extend", type=pathlib.Path)
+    parser.add_argument("--verbose", default=False, action="store_true")
+
     parser.add_argument("--test-server", default=False, action="store_true")
+
+    subparsers = parser.add_subparsers(help="sub-command help")
+    parser_up = subparsers.add_parser("up", help="Startup the services")
+    parser_up.add_argument("--build", default=False, action="store_true", help="Rebuild services")
+    parser_up.add_argument("service", nargs="*", help="Specific service to start")
+
+    parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
+    parser_down.add_argument("service", nargs="*", help="Specific service to close")
+
     options = parser.parse_args()
     print(options)
 
-    if options.test_server:
-        resolve_side_action(get_comm_pipe(options.file.parent))
+    if options.verbose:
+        print(" ** Verbose **")
+        logging.basicConfig(level=logging.DEBUG)
+
+    working_directory = pathlib.Path(os.getcwd())
+    if options.project_directory:
+        working_directory = options.project_directory
+    elif options.file:
+        working_directory = options.file.parent
+    working_directory = working_directory.absolute()
+    cfg_log.debug(f"Working directory: {working_directory}")
+
+    file_choices = ["composeit.yml", "composeit.yaml"]
+    # TODO support multiple
+    if options.file:
+        service_file = options.file.absolute()
     else:
-        start(options.file)
+        for f in file_choices:
+            if (working_directory / f).exists():
+                service_file = working_directory / f
+                break
+        else:
+            service_file = working_directory / file_choices[0]
+    cfg_log.debug(f"Service file: {service_file}")
+
+    project_name = options.project_name if options.project_name else working_directory.name
+
+    cfg_log.debug(f"Project name: {project_name}")
+
+    communication_pipe = get_comm_pipe(working_directory, project_name)
+    cfg_log.debug(f"Communication pipe: {communication_pipe}")
+
+    env_files = [e.absolute() for e in options.env_file]
+
+    # NOTE: evaluate all paths from the commandline before changing working directory
+    os.chdir(working_directory)
+    cfg_log.debug(f"Changed directory to: {working_directory}")
+
+    if len(env_files) == 0 and pathlib.Path(".env").exists():
+        env_files = [pathlib.Path(".env").absolute()]
+    cfg_log.debug(f"Environment files: {env_files}")
+
+    for env_file in env_files:
+        if env_file.exists():
+            cfg_log.debug(f"Reading environment file {env_file}")
+            env = read_env_file(env_file)
+            os.environ.update(env)
+        else:
+            print("Provided environment file does not exist", file=sys.stderr)
+            return 1
+
+    if options.test_server:
+        resolve_side_action(communication_pipe)
+    else:
+        start(service_file, communication_pipe)
+
+
+def read_env_file(path: pathlib.Path):
+    r = {}
+    for line in path.open().readlines():
+        line = line.split("#")[0].strip()
+        if len(line) == 0:
+            continue
+        # TODO: should it be an error?
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        r[k] = v
+    return r
 
 
 def resolve_side_action(comm_pipe_path):
@@ -75,8 +153,8 @@ class UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-def start(file: pathlib.Path):
-    # parsed_data = yaml.safe_load(file.open())
+def start(file: pathlib.Path, communication_pipe: str):
+    # TODO: handle multiple files, merging checks
     parsed_data = yaml.load(file.open(), Loader=UniqueKeyLoader)
     for s in parsed_data["services"]:
         print(s)
@@ -84,7 +162,7 @@ def start(file: pathlib.Path):
 
     service_name = file.parent.name
 
-    asyncio.run(watch_services(file.parent, parsed_data, service_name))
+    asyncio.run(watch_services(file.parent, parsed_data, service_name, communication_pipe))
 
 
 async def hello(request):
@@ -140,12 +218,12 @@ def get_comm_pipe(directory_path, service_name=None):
     return str(directory_path / ".compose")
 
 
-async def watch_services(path, compose_config, service_name, use_color=True):
+async def watch_services(path, compose_config, service_name, communication_pipe, use_color=True):
     try:
         app = web.Application()
         app.add_routes([web.get("/", hello)])
 
-        asyncio.get_event_loop().create_task(run_server(app, get_comm_pipe(path, service_name)))
+        asyncio.get_event_loop().create_task(run_server(app, communication_pipe))
 
         if use_color and os.name == "nt":
             os.system("color")
@@ -192,6 +270,7 @@ class AsyncProcess:
 
         self.rc = None
         self.terminated = False
+        self.stopped = False
         self.exception = None
 
     async def _make_process(service_config):
@@ -270,10 +349,13 @@ class AsyncProcess:
         self.rc = await self.process.wait()
 
     async def _resolve_restart(self):
-        print(f"Resolving restart for {self.name}", self.terminated)
-        if self.restart == "always" and not self.terminated:
+        print(f"Resolving restart for {self.name}", self.terminated, self.stopped)
+        if self.terminated:
+            return False
+
+        if self.restart == "always":
             await self._restart()
-        elif self.restart == "unless-stopped" and not self.terminated:
+        elif self.restart == "unless-stopped" and not self.stopped:
             # TODO this would make more sense with side control and daemon mode
             await self._restart()
         elif self.restart == "on-failure" and self.rc != 0:
@@ -300,6 +382,11 @@ class AsyncProcess:
         self.rc = None
         self.process = None
         self.process_initialization = AsyncProcess._make_process(self.service_config)
+
+    def stop(self):
+        self.stopped = True
+        if self.rc is None and self.process is not None:
+            self.process.terminate()
 
     def terminate(self):
         self.terminated = True
