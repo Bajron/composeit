@@ -5,10 +5,17 @@ import subprocess
 import asyncio
 import signal
 import os
+import logging
 from termcolor import colored
 import termcolor
 
+import aiohttp
+from aiohttp import web
+
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
+
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 def main():
@@ -17,11 +24,29 @@ def main():
         description="Start services defined in file",
     )
     parser.add_argument("-f", "--file", type=pathlib.Path)
-
+    parser.add_argument("--test-server", default=False, action="store_true")
     options = parser.parse_args()
     print(options)
 
-    start(options.file)
+    if options.test_server:
+        resolve_side_action(get_comm_pipe(options.file.parent))
+    else:
+        start(options.file)
+
+
+def resolve_side_action(comm_pipe_path):
+    asyncio.run(run_client_session(comm_pipe_path))
+
+
+async def run_client_session(comm_pipe_path):
+    try:
+        async with aiohttp.NamedPipeConnector(path=comm_pipe_path) as connector:
+            async with aiohttp.ClientSession(connector=connector) as session:
+                print("connect", comm_pipe_path)
+                response = await session.get("http://foo/")
+                print("http client:", response)
+    finally:
+        pass
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
@@ -45,16 +70,67 @@ def start(file: pathlib.Path):
         print(s)
         print(parsed_data["services"][s])
 
-    asyncio.run(watch_services(parsed_data))
+    service_name = file.parent.name
+
+    asyncio.run(watch_services(file.parent, parsed_data, service_name))
 
 
-async def watch_services(compose_config, use_color=True):
+async def hello(request):
+    return web.Response(text="Hello, world")
+
+
+from aiohttp.web import cast, Application, AppRunner, AccessLogger, NamedPipeSite, UnixSite
+
+
+async def run_server(app, path):
+    # Adapted from aiohttp.web._run_app
     try:
-        # https://github.com/python/asyncio/issues/64
-        # https://bugs.python.org/issue37817
-        # https://docs.aiohttp.org/en/stable/client_advanced.html?highlight=named%20pipe#named-pipes-in-windows
-        # asyncio.create_pipe_connection
-        # asyncio.get_event_loop().create_unix_server()
+        print("Creating server", path)
+        if asyncio.iscoroutine(app):
+            app = await app  # type: ignore[misc]
+
+        app = cast(Application, app)
+
+        runner = AppRunner(
+            app,
+            handle_signals=True,
+            access_log_class=AccessLogger,
+            access_log_format=AccessLogger.LOG_FORMAT,
+            access_log=logging.getLogger("httpserver"),
+            keepalive_timeout=75,
+        )
+        await runner.setup()
+        sites = []
+        if os.name == "nt":
+            sites.append(NamedPipeSite(runner=runner, path=f"{path}"))
+        else:
+            sites.append(UnixSite(runner=runner, path=f"{path}"))
+
+        for site in sites:
+            await site.start()
+        delay = 10
+        while True:
+            await asyncio.sleep(delay)
+    finally:
+        await runner.cleanup()
+
+
+def get_comm_pipe(directory_path, service_name=None):
+    if service_name is None:
+        service_name = directory_path.name
+
+    if os.name == "nt":
+        return r"\\.\pipe\composeit_" + f"{service_name}"
+
+    return str(path / ".compose")
+
+
+async def watch_services(path, compose_config, service_name, use_color=True):
+    try:
+        app = web.Application()
+        app.add_routes([web.get("/", hello)])
+
+        asyncio.get_event_loop().create_task(run_server(app, get_comm_pipe(path, service_name)))
 
         if use_color and os.name == "nt":
             os.system("color")
@@ -179,6 +255,7 @@ class AsyncProcess:
         self.rc = await self.process.wait()
 
     async def _resolve_restart(self):
+        print(f"Resolving restart for {self.name}", self.terminated)
         if self.restart == "always" and not self.terminated:
             await self._restart()
         elif self.restart == "unless-stopped" and not self.terminated:
@@ -196,6 +273,7 @@ class AsyncProcess:
                 await self.started()
                 await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
                 print(f" ** {self.service_config['command']} finished with error code {self.rc}")
+                print(f" ** Restart policy is {self.restart}")
                 if not await self._resolve_restart():
                     break
             except FileNotFoundError as ex:
