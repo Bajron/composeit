@@ -111,6 +111,25 @@ docker-compose
 - build as dependecy/prepare operation
   (new configuration fields, as dockerfile or context might not have sense)
 
+options:
+- project-name
+- project directory
+- env-file
+- no colors
+- log level
+- verbose
+
+commands that make sense:
+- build
+- config
+- up/run/start
+- down/kill/stop
+- restart
+- top/ps
+- version
+- logs
+- scale
+
 python:
  - variants of package - with different features if avialable.
    colors or command server is not required to run processes - optional dependencies
