@@ -40,13 +40,20 @@ def resolve_side_action(comm_pipe_path):
 
 async def run_client_session(comm_pipe_path):
     try:
-        async with aiohttp.NamedPipeConnector(path=comm_pipe_path) as connector:
-            async with aiohttp.ClientSession(connector=connector) as session:
-                print("connect", comm_pipe_path)
-                response = await session.get("http://foo/")
-                print("http client:", response)
+        print("connect", comm_pipe_path)
+        if os.name == 'nt':
+            async with aiohttp.NamedPipeConnector(path=comm_pipe_path) as connector:
+                await run_client_commands(connector)
+        else:
+            async with aiohttp.UnixConnector(path=comm_pipe_path) as connector:
+                await run_client_commands(connector)
     finally:
         pass
+
+async def run_client_commands(connector):
+    async with aiohttp.ClientSession(connector=connector) as session:
+        response = await session.get("http://foo/")
+        print("http client:", response)
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
@@ -82,7 +89,7 @@ async def hello(request):
 from aiohttp.web import cast, Application, AppRunner, AccessLogger, NamedPipeSite, UnixSite
 
 
-async def run_server(app, path):
+async def run_server(app, path, delete_pipe=True):
     # Adapted from aiohttp.web._run_app
     try:
         print("Creating server", path)
@@ -113,6 +120,8 @@ async def run_server(app, path):
             await asyncio.sleep(delay)
     finally:
         await runner.cleanup()
+        if delete_pipe:
+            os.unlink(f"{path}")
 
 
 def get_comm_pipe(directory_path, service_name=None):
@@ -122,7 +131,7 @@ def get_comm_pipe(directory_path, service_name=None):
     if os.name == "nt":
         return r"\\.\pipe\composeit_" + f"{service_name}"
 
-    return str(path / ".compose")
+    return str(directory_path / ".compose")
 
 
 async def watch_services(path, compose_config, service_name, use_color=True):
