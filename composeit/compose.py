@@ -50,6 +50,12 @@ def start(file: pathlib.Path):
 
 async def watch_services(compose_config, use_color=True):
     try:
+        # https://github.com/python/asyncio/issues/64
+        # https://bugs.python.org/issue37817
+        # https://docs.aiohttp.org/en/stable/client_advanced.html?highlight=named%20pipe#named-pipes-in-windows
+        # asyncio.create_pipe_connection
+        # asyncio.get_event_loop().create_unix_server()
+
         if use_color and os.name == "nt":
             os.system("color")
 
