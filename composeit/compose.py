@@ -10,7 +10,7 @@ from termcolor import colored
 import termcolor
 
 import aiohttp
-from aiohttp import web
+from aiohttp import web, ClientConnectorError
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
 
@@ -41,14 +41,19 @@ def resolve_side_action(comm_pipe_path):
 async def run_client_session(comm_pipe_path):
     try:
         print("connect", comm_pipe_path)
-        if os.name == 'nt':
+        if os.name == "nt":
             async with aiohttp.NamedPipeConnector(path=comm_pipe_path) as connector:
                 await run_client_commands(connector)
         else:
             async with aiohttp.UnixConnector(path=comm_pipe_path) as connector:
                 await run_client_commands(connector)
+    except ClientConnectorError as ex:
+        print(f" ** Connection error for {comm_pipe_path}: {ex}")
+    except FileNotFoundError as ex:
+        print(f" ** Name error for {comm_pipe_path}: {ex}")
     finally:
         pass
+
 
 async def run_client_commands(connector):
     async with aiohttp.ClientSession(connector=connector) as session:
@@ -120,7 +125,8 @@ async def run_server(app, path, delete_pipe=True):
             await asyncio.sleep(delay)
     finally:
         await runner.cleanup()
-        if delete_pipe:
+        # Seems to be cleaned on Windows
+        if delete_pipe and os.name != "nt":
             os.unlink(f"{path}")
 
 
