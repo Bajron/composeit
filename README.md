@@ -63,6 +63,8 @@ There are similar things like `pypyr` or `prefect`,
 but they kind of do a different thing.
 I wanted to organiza a set of long running processes, not a pipeline.
 
+Later I also found `honcho`, seems ok for the task.
+
 There is a package called `just-compose` (wanted that name ;( ).
 I foudn it late. It seems to be kind of what I want.
 I could not find a documentation page for this one.

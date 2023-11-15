@@ -9,8 +9,9 @@ import sys
 import logging
 from termcolor import colored
 import termcolor
-
+import dotenv
 import aiohttp
+import io
 from aiohttp import web, ClientConnectorError
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
@@ -22,13 +23,17 @@ def main():
         description="Define and run applications",
     )
     cfg_log = logging.getLogger("config")
-    parser.add_argument("-f", "--file", default=None, type=pathlib.Path, help="Compose configuration file")
+    parser.add_argument(
+        "-f", "--file", nargs="*", default=[], action="extend", type=pathlib.Path, help="Compose configuration file"
+    )
     parser.add_argument("-p", "--project-name", default=None, type=str, help="Project name")
     parser.add_argument("--project-directory", default=None, type=pathlib.Path, help="Alternate working directory")
     parser.add_argument("--env-file", default=[], action="extend", type=pathlib.Path)
     parser.add_argument("--verbose", default=False, action="store_true")
 
-    parser.add_argument("--test-server", default=False, action="store_true")
+    parser.add_argument(
+        "--test-server", default=None, help="Temporary option to perform GET with a provided URL on the server"
+    )
 
     subparsers = parser.add_subparsers(help="sub-command help")
     parser_up = subparsers.add_parser("up", help="Startup the services")
@@ -48,30 +53,27 @@ def main():
     working_directory = pathlib.Path(os.getcwd())
     if options.project_directory:
         working_directory = options.project_directory
-    elif options.file:
-        working_directory = options.file.parent
+    elif len(options.file) > 0:
+        working_directory = options.file[0].parent
     working_directory = working_directory.absolute()
     cfg_log.debug(f"Working directory: {working_directory}")
 
     file_choices = ["composeit.yml", "composeit.yaml"]
     # TODO support multiple
-    if options.file:
-        service_file = options.file.absolute()
+    if len(options.file) > 0:
+        service_files = [f.absolute() for f in options.file]
     else:
         for f in file_choices:
             if (working_directory / f).exists():
-                service_file = working_directory / f
+                service_files = [working_directory / f]
                 break
         else:
-            service_file = working_directory / file_choices[0]
-    cfg_log.debug(f"Service file: {service_file}")
+            service_files = [working_directory / file_choices[0]]
+    cfg_log.debug(f"Service file: {service_files}")
 
     project_name = options.project_name if options.project_name else working_directory.name
 
     cfg_log.debug(f"Project name: {project_name}")
-
-    communication_pipe = get_comm_pipe(working_directory, project_name)
-    cfg_log.debug(f"Communication pipe: {communication_pipe}")
 
     env_files = [e.absolute() for e in options.env_file]
 
@@ -86,45 +88,149 @@ def main():
     for env_file in env_files:
         if env_file.exists():
             cfg_log.debug(f"Reading environment file {env_file}")
-            env = read_env_file(env_file)
-            os.environ.update(env)
+            dotenv.load_dotenv(env_file, override=True)
         else:
             print("Provided environment file does not exist", file=sys.stderr)
             return 1
 
-    if options.test_server:
-        resolve_side_action(communication_pipe)
+    compose = Compose(project_name, working_directory, service_files)
+
+    if options.test_server is not None:
+        compose.side_action(options.test_server)
     else:
-        start(service_file, communication_pipe)
+        compose.run()
 
 
-def read_env_file(path: pathlib.Path):
-    r = {}
-    for line in path.open().readlines():
-        line = line.split("#")[0].strip()
-        if len(line) == 0:
-            continue
-        # TODO: should it be an error?
-        if "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        r[k] = v
-    return r
+def resolve_string(s: str):
+    # NOTE: This is not fully compatible with https://docs.docker.com/compose/environment-variables/env-file/
+    #       Required and alternative values are not handled. Single quote also a little different.
+    #       We are working on that though B]
+    #       https://github.com/Bajron/python-dotenv
+    return dotenv.dotenv_values(io.StringIO(f'X="{s}"'))["X"]
+    return dotenv.main.resolve_variables({"H": f"{s}"})["H"]
+    # TODO: single quotes
+    # TODO: new interface after change
 
 
-def resolve_side_action(comm_pipe_path):
-    asyncio.run(run_client_session(comm_pipe_path))
+class Compose:
+    def __init__(self, project_name, working_directory, service_files) -> None:
+        self.project_name = project_name
+        self.working_directory = working_directory
+
+        self.logger = logging.getLogger(project_name)
+
+        self.communication_pipe = get_comm_pipe(working_directory, project_name)
+        self.logger.debug(f"Communication pipe: {self.communication_pipe}")
+
+        self.service_files = service_files
+        self.service_config = {}
+        self.services = {}
+        self.app = None
+
+    def run(self):
+        # TODO: handle multiple files, merging checks
+        for file in self.service_files:
+            parsed_data = yaml.load(file.open(), Loader=UniqueKeyLoader)
+            for s in parsed_data["services"]:
+                print(s)
+                print(parsed_data["services"][s])
+            break  # FIXME
+
+        self.service_config = parsed_data
+
+        asyncio.run(self.watch_services())
+
+    def get_call_json(self):
+        return {
+            "project_name": self.project_name,
+            "working_directory": str(self.working_directory),
+            "service_files": [str(f) for f in self.service_files],
+        }
+
+    async def get_call(self, request):
+        return web.json_response(self.get_call_json())
+
+    def get_project_json(self):
+        return {"services": [k for k in self.services.keys()]}
+
+    async def get_project(self, request: web.Request):
+        project = request.match_info.get("project", "")
+        if project != self.project_name:
+            return web.Response(status=404)
+
+        return web.json_response(self.get_project_json())
+
+    def get_service_json(self, service_name):
+        s = self.services[service_name]
+        return {"name": s.name, "pid": s.process.pid}
+
+    async def get_service(self, request: web.Request):
+        project = request.match_info.get("project", "")
+        if project != self.project_name:
+            return web.Response(status=404)
+
+        service = request.match_info.get("service", "")
+        if service not in self.services.keys():
+            return web.Response(status=404)
+
+        return web.json_response(self.get_service_json(service))
+
+    def start_server(self):
+        app = web.Application()
+        app.add_routes(
+            [
+                web.get("/", self.get_call),
+                web.get("/{project}", self.get_project),
+                web.get("/{project}/{service}", self.get_service),
+            ]
+        )
+
+        asyncio.get_event_loop().create_task(run_server(app, self.communication_pipe))
+
+    async def watch_services(self, use_color=True):
+        try:
+            self.start_server()
+
+            if use_color and os.name == "nt":
+                os.system("color")
+
+            self.services = {
+                name: AsyncProcess(i, name, service_config, use_color)
+                for (i, (name, service_config)) in enumerate(self.service_config["services"].items())
+            }
+            services = list(self.services.values())
+
+            def shutdown_action():
+                print(" *** Calling terminate on sub processes")
+                for s in services:
+                    s.terminate()
+
+            def signal_handler(signal, frame):
+                asyncio.get_event_loop().call_soon_threadsafe(shutdown_action)
+
+            signal.signal(signal.SIGINT, signal_handler)
+
+            # Well, this is not implemented for Windows
+            # asyncio.get_event_loop().add_signal_handler(signal.SIGINT, signal_handler)
+
+            await asyncio.gather(*[s.watch() for s in services])
+        finally:
+            for s in services:
+                s.terminate()
+
+    def side_action(self, action):
+        asyncio.run(run_client_session(self.communication_pipe, action))
 
 
-async def run_client_session(comm_pipe_path):
+async def run_client_session(comm_pipe_path, url):
     try:
         print("connect", comm_pipe_path)
         if os.name == "nt":
             async with aiohttp.NamedPipeConnector(path=comm_pipe_path) as connector:
-                await run_client_commands(connector)
+                await run_client_commands(connector, url)
         else:
             async with aiohttp.UnixConnector(path=comm_pipe_path) as connector:
-                await run_client_commands(connector)
+                await run_client_commands(connector, url)
     except ClientConnectorError as ex:
         print(f" ** Connection error for {comm_pipe_path}: {ex}")
     except FileNotFoundError as ex:
@@ -133,10 +239,11 @@ async def run_client_session(comm_pipe_path):
         pass
 
 
-async def run_client_commands(connector):
+async def run_client_commands(connector, url):
     async with aiohttp.ClientSession(connector=connector) as session:
-        response = await session.get("http://foo/")
+        response = await session.get(f"http://foo{url}")
         print("http client:", response)
+        print(await response.json())
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
@@ -153,26 +260,10 @@ class UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-def start(file: pathlib.Path, communication_pipe: str):
-    # TODO: handle multiple files, merging checks
-    parsed_data = yaml.load(file.open(), Loader=UniqueKeyLoader)
-    for s in parsed_data["services"]:
-        print(s)
-        print(parsed_data["services"][s])
-
-    service_name = file.parent.name
-
-    asyncio.run(watch_services(file.parent, parsed_data, service_name, communication_pipe))
-
-
-async def hello(request):
-    return web.Response(text="Hello, world")
-
-
 from aiohttp.web import cast, Application, AppRunner, AccessLogger, NamedPipeSite, UnixSite
 
 
-async def run_server(app, path, delete_pipe=True):
+async def run_server(app: Application, path: str, delete_pipe=True):
     # Adapted from aiohttp.web._run_app
     try:
         print("Creating server", path)
@@ -208,48 +299,14 @@ async def run_server(app, path, delete_pipe=True):
             os.unlink(f"{path}")
 
 
-def get_comm_pipe(directory_path, service_name=None):
-    if service_name is None:
-        service_name = directory_path.name
+def get_comm_pipe(directory_path, project_name=None):
+    if project_name is None:
+        project_name = directory_path.name
 
     if os.name == "nt":
-        return r"\\.\pipe\composeit_" + f"{service_name}"
+        return r"\\.\pipe\composeit_" + f"{project_name}"
 
     return str(directory_path / ".compose")
-
-
-async def watch_services(path, compose_config, service_name, communication_pipe, use_color=True):
-    try:
-        app = web.Application()
-        app.add_routes([web.get("/", hello)])
-
-        asyncio.get_event_loop().create_task(run_server(app, communication_pipe))
-
-        if use_color and os.name == "nt":
-            os.system("color")
-
-        services = [
-            AsyncProcess(i, name, service_config, use_color)
-            for (i, (name, service_config)) in enumerate(compose_config["services"].items())
-        ]
-
-        def shutdown_action():
-            print(" *** Calling terminate on sub processes")
-            for s in services:
-                s.terminate()
-
-        def signal_handler(signal, frame):
-            asyncio.get_event_loop().call_soon_threadsafe(shutdown_action)
-
-        signal.signal(signal.SIGINT, signal_handler)
-
-        # Well, this is not implemented for Windows
-        # asyncio.get_event_loop().add_signal_handler(signal.SIGINT, signal_handler)
-
-        await asyncio.gather(*[s.watch() for s in services])
-    finally:
-        for s in services:
-            s.terminate()
 
 
 RestartPolicyOptions = ["no", "always", "on-failure", "unless-stopped"]
@@ -268,6 +325,8 @@ class AsyncProcess:
 
         self.color = USABLE_COLORS[self.sequence % len(USABLE_COLORS)]
 
+        self.popen_kw = {}
+
         self.rc = None
         self.terminated = False
         self.stopped = False
@@ -283,15 +342,24 @@ class AsyncProcess:
             else:
                 env = {}
 
-        # TODO env files
-
-        if "environment" in service_config:
+        if "env_file" in service_config or "environment" in service_config:
             if env is None:
                 env = os.environ.copy()
+
+        if "env_file" in service_config:
+            ef = service_config["env_file"]
+            if not isinstance(ef, list):
+                ef = [ef]
+            for f in ef:
+                env.update(dotenv.dotenv_values(f))
+
+        if "environment" in service_config:
             env_definition = service_config["environment"]
+            if isinstance(env_definition, str):
+                env_definition = [env_definition]
             if isinstance(env_definition, list):
-                splits = [e.split("=", 1) for e in env_definition]
-                to_add = {s[0]: s[1] if len(s) == 2 else os.environ.get(s[0], "") for s in splits}
+                entries = [dotenv.dotenv_values(stream=io.StringIO(e)) for e in env_definition]
+                to_add = {k: v if v is not None else os.environ.get(k, "") for d in entries for k, v in d.items()}
             if isinstance(env_definition, dict):
                 to_add = env_definition
             env.update(to_add)
