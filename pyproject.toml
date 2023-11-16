@@ -29,7 +29,7 @@ dev = [
 #dynamic = ["version"]
 
 [project.scripts]
-composeit = "composeit.compose:main"
+composeit = "composeit.main:main"
 
 [tool.black]
 line-length = 120
