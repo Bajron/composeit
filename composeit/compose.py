@@ -353,6 +353,7 @@ class AsyncProcess:
         logHandler.setFormatter(logging.Formatter(" **%(name)s** %(message)s"))
         self.log.addHandler(logHandler)
         self.log.setLevel(logging.INFO)
+        self.log.propagate = False
 
         color_wrap = make_colored(self.color) if self.use_color else not_colored
         formatter = logging.Formatter(color_wrap("%(name)s%(message)s"))
@@ -361,8 +362,10 @@ class AsyncProcess:
         streamHandler.terminator = ""
         self.lout.setLevel(logging.INFO)
         self.lout.addHandler(streamHandler)
+        self.lout.propagate = False
         self.lerr.setLevel(logging.INFO)
         self.lerr.addHandler(streamHandler)
+        self.lerr.propagate = False
 
         self.popen_kw = {}
 
