@@ -33,3 +33,9 @@ services:
     command: ping google.com
     shell: true
     restart: always
+
+  ping_no_log:
+    inherit_environment: false
+    command: [ping, -t, wp.pl]
+    logging:
+      driver: none

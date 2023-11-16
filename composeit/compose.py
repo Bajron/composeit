@@ -7,12 +7,25 @@ import signal
 import os
 import sys
 import logging
-from termcolor import colored
 import termcolor
 import dotenv
 import aiohttp
 import io
 from aiohttp import web, ClientConnectorError
+
+from termcolor import colored
+
+
+def make_colored(color):
+    def f(s):
+        return colored(s, color)
+
+    return f
+
+
+def not_colored(s):
+    return s
+
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
 
@@ -30,6 +43,7 @@ def main():
     parser.add_argument("--project-directory", default=None, type=pathlib.Path, help="Alternate working directory")
     parser.add_argument("--env-file", default=[], action="extend", type=pathlib.Path)
     parser.add_argument("--verbose", default=False, action="store_true")
+    parser.add_argument("--no-color", default=False, action="store_true")
 
     parser.add_argument(
         "--test-server", default=None, help="Temporary option to perform GET with a provided URL on the server"
@@ -94,6 +108,9 @@ def main():
             return 1
 
     compose = Compose(project_name, working_directory, service_files)
+    if options.no_color:
+        cfg_log.debug("Disabling colors")
+        compose.disableColors()
 
     if options.test_server is not None:
         compose.side_action(options.test_server)
@@ -121,11 +138,15 @@ class Compose:
 
         self.communication_pipe = get_comm_pipe(working_directory, project_name)
         self.logger.debug(f"Communication pipe: {self.communication_pipe}")
+        self.use_colors = True
 
         self.service_files = service_files
         self.service_config = {}
         self.services = {}
         self.app = None
+
+    def disableColors(self):
+        self.use_colors = False
 
     def run(self):
         # TODO: handle multiple files, merging checks
@@ -138,7 +159,7 @@ class Compose:
 
         self.service_config = parsed_data
 
-        asyncio.run(self.watch_services())
+        asyncio.run(self.watch_services(self.use_colors))
 
     def get_call_json(self):
         return {
@@ -324,6 +345,24 @@ class AsyncProcess:
         assert self.restart in RestartPolicyOptions
 
         self.color = USABLE_COLORS[self.sequence % len(USABLE_COLORS)]
+        self.lout = logging.getLogger(f"{self.name}: ")
+        self.lerr = logging.getLogger(f"{self.name}> ")
+        self.log = logging.getLogger(f"{self.name}")
+
+        logHandler = logging.StreamHandler(stream=sys.stderr)
+        logHandler.setFormatter(logging.Formatter(" **%(name)s** %(message)s"))
+        self.log.addHandler(logHandler)
+        self.log.setLevel(logging.INFO)
+
+        color_wrap = make_colored(self.color) if self.use_color else not_colored
+        formatter = logging.Formatter(color_wrap("%(name)s%(message)s"))
+        streamHandler = logging.StreamHandler(stream=sys.stdout)
+        streamHandler.setFormatter(formatter)
+        streamHandler.terminator = ""
+        self.lout.setLevel(logging.INFO)
+        self.lout.addHandler(streamHandler)
+        self.lerr.setLevel(logging.INFO)
+        self.lerr.addHandler(streamHandler)
 
         self.popen_kw = {}
 
@@ -364,6 +403,13 @@ class AsyncProcess:
                 to_add = env_definition
             env.update(to_add)
 
+        stream_mode = asyncio.subprocess.PIPE
+        if "logging" in service_config:
+            l = service_config["logging"]
+            driver = l.get("driver", "")
+            if driver == "none":
+                stream_mode = asyncio.subprocess.DEVNULL
+
         popen_kw = {"env": env}
 
         if "working_dir" in service_config:
@@ -380,8 +426,8 @@ class AsyncProcess:
                 print(" ** args ignored with a shell command")
             process = await asyncio.create_subprocess_shell(
                 cmd=service_config["command"],
-                stderr=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
+                stderr=stream_mode,
+                stdout=stream_mode,
                 **popen_kw,
             )
         else:
@@ -391,9 +437,7 @@ class AsyncProcess:
                 else [service_config["command"]]
             )
             command.extend(service_config.get("args", []))
-            process = await asyncio.create_subprocess_exec(
-                *command, stderr=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, **popen_kw
-            )
+            process = await asyncio.create_subprocess_exec(*command, stderr=stream_mode, stdout=stream_mode, **popen_kw)
         return process
 
     async def started(self):
@@ -406,12 +450,16 @@ class AsyncProcess:
         print(s, end="")
 
     async def watch_stderr(self):
+        if self.process.stderr is None:
+            return
         async for l in self.process.stderr:
-            self._output(">", l.decode())
+            self.lerr.info(l.decode())
 
     async def watch_stdout(self):
+        if self.process.stdout is None:
+            return
         async for l in self.process.stdout:
-            self._output(":", l.decode())
+            self.lout.info(l.decode())
 
     async def wait_for_code(self):
         self.rc = await self.process.wait()
@@ -437,12 +485,12 @@ class AsyncProcess:
             try:
                 await self.started()
                 await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
-                print(f" ** {self.service_config['command']} finished with error code {self.rc}")
-                print(f" ** Restart policy is {self.restart}")
+                self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
+                self.log.info(f"Restart policy is {self.restart}")
                 if not await self._resolve_restart():
                     break
             except FileNotFoundError as ex:
-                print(f" ** Error running command {self.name} {ex}")
+                self.log.error(f"Error running command {self.name} {ex}")
                 self.exception = ex
                 break
 

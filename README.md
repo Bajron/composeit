@@ -118,6 +118,7 @@ options:
 - project directory
 - env-file
 - no colors
+- ansi (never, always, auto)
 - log level
 - verbose
 
