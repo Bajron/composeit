@@ -7,9 +7,12 @@ import termcolor
 import dotenv
 import aiohttp
 import io
+import pathlib
+import hashlib
 from aiohttp import web, ClientConnectorError
 from .process import AsyncProcess
 
+from socket import gethostname
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
 
@@ -36,11 +39,14 @@ class ColorAssigner:
 
 
 class Compose:
-    def __init__(self, project_name, working_directory, service_files, use_color=True) -> None:
+    def __init__(self, project_name, working_directory, service_files, verbose=False, use_color=True) -> None:
         self.project_name = project_name
         self.working_directory = working_directory
 
+        self.verbose = verbose
         self.logger = logging.getLogger(project_name)
+        if self.verbose:
+            self.logger.setLevel(logging.DEBUG)
 
         self.communication_pipe = get_comm_pipe(working_directory, project_name)
         self.logger.debug(f"Communication pipe: {self.communication_pipe}")
@@ -67,7 +73,7 @@ class Compose:
 
         self.service_config = parsed_data
 
-        asyncio.run(self.watch_services(self.use_colors))
+        asyncio.run(self.watch_services())
 
     def get_call_json(self):
         return {
@@ -116,13 +122,10 @@ class Compose:
 
         asyncio.get_event_loop().create_task(run_server(app, self.communication_pipe))
 
-    async def watch_services(self, use_color=True):
+    async def watch_services(self, start_services=None):
+        services: list[AsyncProcess] = []
         try:
             self.start_server()
-
-            if use_color and os.name == "nt":
-                os.system("color")
-
             self.services = {
                 name: AsyncProcess(i, name, service_config, self._get_next_color())
                 for (i, (name, service_config)) in enumerate(self.service_config["services"].items())
@@ -131,48 +134,76 @@ class Compose:
 
             def shutdown_action():
                 print(" *** Calling terminate on sub processes")
-                for s in services:
-                    s.terminate()
+                for service in services:
+                    service.terminate()
 
             def signal_handler(signal, frame):
                 asyncio.get_event_loop().call_soon_threadsafe(shutdown_action)
 
             signal.signal(signal.SIGINT, signal_handler)
-
             # Well, this is not implemented for Windows
             # asyncio.get_event_loop().add_signal_handler(signal.SIGINT, signal_handler)
 
+            if start_services is None:
+                for service in services:
+                    service.start()
+            else:
+                for name in start_services:
+                    self.services[name].start()
+
             await asyncio.gather(*[s.watch() for s in services])
         finally:
-            for s in services:
-                s.terminate()
+            for service in services:
+                service.terminate()
 
     def side_action(self, action):
-        asyncio.run(run_client_session(self.communication_pipe, action))
+        asyncio.run(self.run_client_session(self.make_single_url_request(action)))
 
+    async def run_client_session(self, session_function):
+        try:
+            return await self.execute_client_session(session_function)
+        except ClientConnectorError as ex:
+            self.logger.error(f" ** Connection error for {self.communication_pipe}: {ex}")
+        except FileNotFoundError as ex:
+            self.logger.error(f" ** Name error for {self.communication_pipe}: {ex}")
+        return None
 
-async def run_client_session(comm_pipe_path, url):
-    try:
-        print("connect", comm_pipe_path)
+    async def execute_client_session(self, session_function):
+        self.logger.debug(f"Connect: {self.communication_pipe}")
         if os.name == "nt":
-            async with aiohttp.NamedPipeConnector(path=comm_pipe_path) as connector:
-                await run_client_commands(connector, url)
+            async with aiohttp.NamedPipeConnector(path=self.communication_pipe) as connector:
+                return await session_function(connector)
         else:
-            async with aiohttp.UnixConnector(path=comm_pipe_path) as connector:
-                await run_client_commands(connector, url)
-    except ClientConnectorError as ex:
-        print(f" ** Connection error for {comm_pipe_path}: {ex}")
-    except FileNotFoundError as ex:
-        print(f" ** Name error for {comm_pipe_path}: {ex}")
-    finally:
-        pass
+            async with aiohttp.UnixConnector(path=self.communication_pipe) as connector:
+                return await session_function(connector, url)
 
+    async def check_server_is_running(self):
+        try:
+            command = self.make_single_url_request("/")
+            response = await self.execute_client_session(command)
+            if response["project_name"] != self.project_name:
+                raise Exception(
+                    f"Unexpected project received from the server. Received {response['project_name']} while expecting {self.project_name}"
+                )
+            return True
+        except ClientConnectorError as ex:
+            pass
+        except FileNotFoundError as ex:
+            pass
+        return False
 
-async def run_client_commands(connector, url):
-    async with aiohttp.ClientSession(connector=connector) as session:
-        response = await session.get(f"http://foo{url}")
-        print("http client:", response)
-        print(await response.json())
+    def make_single_url_request(self, url):
+        async def run_client_commands(connector):
+            async with aiohttp.ClientSession(connector=connector) as session:
+                path = f"http://{gethostname()}{url}"
+                self.logger.debug(f"HTTP GET: {path}")
+                response = await session.get(path)
+                self.logger.debug(f"HTTP response: {response}")
+                if response.status == 200:
+                    print(await response.json())
+                return response
+
+        return run_client_commands
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
@@ -228,11 +259,12 @@ async def run_server(app: Application, path: str, delete_pipe=True):
             os.unlink(f"{path}")
 
 
-def get_comm_pipe(directory_path, project_name=None):
+def get_comm_pipe(directory_path: pathlib.Path, project_name: str = None):
     if project_name is None:
         project_name = directory_path.name
 
     if os.name == "nt":
-        return r"\\.\pipe\composeit_" + f"{project_name}"
+        h = hashlib.sha256(str(directory_path.resolve()).encode()).hexdigest()
+        return r"\\.\pipe\composeit_" + f"{project_name}_{h}"
 
-    return str(directory_path / ".compose")
+    return str(directory_path / ".daemon")

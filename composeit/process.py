@@ -26,7 +26,9 @@ class AsyncProcess:
         self.sequence = sequence
         self.name = name
         self.service_config = service_config
-        self.process_initialization = self._make_process()
+
+        self.startup_semaphore = asyncio.Semaphore(0)
+        self.process_initialization = None
         self.process: asyncio.subprocess.Process = None
 
         self.restart = service_config.get("restart", "no")
@@ -135,9 +137,6 @@ class AsyncProcess:
             process = await asyncio.create_subprocess_exec(*command, stderr=stream_mode, stdout=stream_mode, **popen_kw)
         return process
 
-    async def started(self):
-        self.process = await self.process_initialization
-
     def _output(self, sep: str, message: str):
         s = f"{self.name}{sep} {message}"
         if self.color is not None:
@@ -176,23 +175,37 @@ class AsyncProcess:
         return True
 
     async def watch(self):
-        while True:
-            try:
-                await self.started()
-                await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
-                self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
-                self.log.info(f"Restart policy is {self.restart}")
-                if not await self._resolve_restart():
+        while not self.stopped and not self.terminated:
+            await self.startup_semaphore.acquire()
+            if self.terminated:
+                return
+
+            await self._restart()
+            while True:
+                try:
+                    await self.started()
+                    await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
+                    self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
+
+                    self.log.info(f"Restart policy is {self.restart}")
+                    if not await self._resolve_restart():
+                        break
+                except FileNotFoundError as ex:
+                    self.log.error(f"Error running command {self.name} {ex}")
+                    self.exception = ex
                     break
-            except FileNotFoundError as ex:
-                self.log.error(f"Error running command {self.name} {ex}")
-                self.exception = ex
-                break
+
+    def start(self):
+        self.stopped = False
+        self.startup_semaphore.release()
 
     async def _restart(self):
         self.rc = None
         self.process = None
         self.process_initialization = self._make_process()
+
+    async def started(self):
+        self.process = await self.process_initialization
 
     def stop(self):
         self.stopped = True
@@ -203,3 +216,4 @@ class AsyncProcess:
         self.terminated = True
         if self.rc is None and self.process is not None:
             self.process.terminate()
+        self.startup_semaphore.release()

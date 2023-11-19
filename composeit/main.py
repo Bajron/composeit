@@ -35,11 +35,16 @@ def main():
     parser_down.add_argument("service", nargs="*", help="Specific service to close")
 
     options = parser.parse_args()
-    print(options)
 
     if options.verbose:
-        print(" ** Verbose **")
+        print(" ** Verbose **", file=sys.stderr)
         logging.basicConfig(level=logging.DEBUG)
+        cfg_log.debug(f"Parsed options: {options}")
+
+    use_color=not options.no_color
+    if use_color and os.name == "nt":
+        cfg_log.debug(f"Running `os.system(\"color\")`")
+        os.system("color")
 
     working_directory = pathlib.Path(os.getcwd())
     if options.project_directory:
@@ -84,7 +89,9 @@ def main():
             print("Provided environment file does not exist", file=sys.stderr)
             return 1
 
-    compose = Compose(project_name, working_directory, service_files, not options.no_color)
+    compose = Compose(
+        project_name, working_directory, service_files, verbose=options.verbose, use_color=use_color
+    )
 
     if options.test_server is not None:
         compose.side_action(options.test_server)
