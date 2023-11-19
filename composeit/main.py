@@ -25,6 +25,9 @@ def main():
     parser.add_argument(
         "--test-server", default=None, help="Temporary option to perform GET with a provided URL on the server"
     )
+    parser.add_argument(
+        "--test-server-post", default=None, help="Temporary option to perform POST with a provided URL on the server"
+    )
 
     subparsers = parser.add_subparsers(help="sub-command help")
     parser_up = subparsers.add_parser("up", help="Startup the services")
@@ -94,6 +97,8 @@ def main():
     )
 
     if options.test_server is not None:
-        compose.side_action(options.test_server)
+        compose.test_server(options.test_server, "GET")
+    elif options.test_server_post is not None:
+        compose.test_server(options.test_server_post, "POST")
     else:
         compose.run()

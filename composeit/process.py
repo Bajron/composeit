@@ -63,7 +63,7 @@ class AsyncProcess:
 
         self.rc = None
         self.terminated = False
-        self.stopped = False
+        self.stopped = True
         self.exception = None
 
     async def _make_process(self):
@@ -175,29 +175,35 @@ class AsyncProcess:
         return True
 
     async def watch(self):
-        while not self.stopped and not self.terminated:
+        while not self.terminated:
             await self.startup_semaphore.acquire()
             if self.terminated:
                 return
 
-            await self._restart()
-            while True:
-                try:
+            try:
+                await self._restart()
+                process_started = True
+
+                while process_started:
                     await self.started()
                     await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
                     self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
 
                     self.log.info(f"Restart policy is {self.restart}")
-                    if not await self._resolve_restart():
-                        break
-                except FileNotFoundError as ex:
-                    self.log.error(f"Error running command {self.name} {ex}")
-                    self.exception = ex
-                    break
+                    process_started = await self._resolve_restart()
+            except FileNotFoundError as ex:
+                self.log.error(f"Error running command {self.name} {ex}")
+                self.exception = ex
+                break
 
     def start(self):
-        self.stopped = False
-        self.startup_semaphore.release()
+        if self.stopped:
+            self.stopped = False
+            self.startup_semaphore.release()
+            return True
+        else:
+            self.log.warning("Does not seem to be stopped")
+            return False
 
     async def _restart(self):
         self.rc = None

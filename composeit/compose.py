@@ -88,11 +88,25 @@ class Compose:
     def get_project_json(self):
         return {"services": [k for k in self.services.keys()]}
 
-    async def get_project(self, request: web.Request):
+    def _get_project(self, request: web.Request):
         project = request.match_info.get("project", "")
         if project != self.project_name:
             return web.Response(status=404)
+        return project
 
+    async def post_stop_project(self, request: web.Request):
+        self._get_project(request)
+        self.shutdown()
+        return web.json_response("Stopped")
+
+    def _get_service(self, request: web.Request):
+        service = request.match_info.get("service", "")
+        if service not in self.services.keys():
+            raise web.HTTPNotFound(reason="Service not found")
+        return service
+
+    async def get_project(self, request: web.Request):
+        self._get_project(request)
         return web.json_response(self.get_project_json())
 
     def get_service_json(self, service_name):
@@ -100,15 +114,21 @@ class Compose:
         return {"name": s.name, "pid": s.process.pid, "pobject": s.popen_kw}
 
     async def get_service(self, request: web.Request):
-        project = request.match_info.get("project", "")
-        if project != self.project_name:
-            return web.Response(status=404)
-
-        service = request.match_info.get("service", "")
-        if service not in self.services.keys():
-            return web.Response(status=404)
-
+        self._get_project(request)
+        service = self._get_service(request)
         return web.json_response(self.get_service_json(service))
+
+    async def post_stop_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        self.services[service].stop()
+        return web.json_response("Stopped")
+
+    async def post_start_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        message = "Started" if self.services[service].start() else "Running"
+        return web.json_response(message)
 
     def start_server(self):
         app = web.Application()
@@ -116,11 +136,19 @@ class Compose:
             [
                 web.get("/", self.get_call),
                 web.get("/{project}", self.get_project),
+                web.post("/{project}/stop", self.post_stop_project),
                 web.get("/{project}/{service}", self.get_service),
+                web.post("/{project}/{service}/stop", self.post_stop_service),
+                web.post("/{project}/{service}/start", self.post_start_service),
             ]
         )
 
         asyncio.get_event_loop().create_task(run_server(app, self.communication_pipe))
+
+    def shutdown(self):
+        self.logger.info(" *** Calling terminate on sub processes")
+        for service in self.services.values():
+            service.terminate()
 
     async def watch_services(self, start_services=None):
         services: list[AsyncProcess] = []
@@ -132,13 +160,8 @@ class Compose:
             }
             services = list(self.services.values())
 
-            def shutdown_action():
-                print(" *** Calling terminate on sub processes")
-                for service in services:
-                    service.terminate()
-
             def signal_handler(signal, frame):
-                asyncio.get_event_loop().call_soon_threadsafe(shutdown_action)
+                asyncio.get_event_loop().call_soon_threadsafe(self.shutdown)
 
             signal.signal(signal.SIGINT, signal_handler)
             # Well, this is not implemented for Windows
@@ -153,11 +176,14 @@ class Compose:
 
             await asyncio.gather(*[s.watch() for s in services])
         finally:
-            for service in services:
-                service.terminate()
+            self.shutdown()
 
     def side_action(self, action):
+        # TODO evolve into actual action start/stop etc.
         asyncio.run(self.run_client_session(self.make_single_url_request(action)))
+
+    def test_server(self, url, method):
+        asyncio.run(self.run_client_session(self.make_single_url_request(url, method)))
 
     async def run_client_session(self, session_function):
         try:
@@ -179,7 +205,7 @@ class Compose:
 
     async def check_server_is_running(self):
         try:
-            command = self.make_single_url_request("/")
+            command = self.make_single_url_request("/", method="GET")
             response = await self.execute_client_session(command)
             if response["project_name"] != self.project_name:
                 raise Exception(
@@ -192,12 +218,12 @@ class Compose:
             pass
         return False
 
-    def make_single_url_request(self, url):
+    def make_single_url_request(self, url, method="GET"):
         async def run_client_commands(connector):
             async with aiohttp.ClientSession(connector=connector) as session:
                 path = f"http://{gethostname()}{url}"
-                self.logger.debug(f"HTTP GET: {path}")
-                response = await session.get(path)
+                self.logger.debug(f"HTTP {method}: {path}")
+                response = await session.request(method, path)
                 self.logger.debug(f"HTTP response: {response}")
                 if response.status == 200:
                     print(await response.json())
