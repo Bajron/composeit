@@ -12,6 +12,8 @@ import hashlib
 from aiohttp import web, ClientConnectorError
 from .process import AsyncProcess
 
+import pprint
+
 from socket import gethostname
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
@@ -22,10 +24,20 @@ def resolve_string(s: str):
     #       Required and alternative values are not handled. Single quote also a little different.
     #       We are working on that though B]
     #       https://github.com/Bajron/python-dotenv
-    return dotenv.dotenv_values(io.StringIO(f'X="{s}"'))["X"]
+    return dotenv.dotenv_values(stream=io.StringIO(f'X="{s}"'))["X"]
     return dotenv.main.resolve_variables({"H": f"{s}"})["H"]
     # TODO: single quotes
     # TODO: new interface after change
+
+
+def resolve(value):
+    if isinstance(value, list):
+        return [resolve(e) for e in value]
+    if isinstance(value, dict):
+        return {k: resolve(v) for k, v in value.items()}
+    if isinstance(value, str):
+        return resolve_string(value)
+    return value
 
 
 class ColorAssigner:
@@ -58,6 +70,9 @@ class Compose:
         self.service_config = {}
         self._parse_service_config()
 
+        self.depending = None
+        self._update_depending()
+
         self.services = {}
         self.app = None
 
@@ -73,7 +88,22 @@ class Compose:
                 print(parsed_data["services"][s])
             break  # FIXME
 
-        self.service_config = parsed_data
+        self.service_config = resolve(parsed_data)
+
+        if self.verbose:
+            pprint.pp(self.service_config)
+
+    def _update_depending(self):
+        depending = {}
+        for name, service in self.service_config["services"].items():
+            if "depends_on" in service:
+                depends_on = service["depends_on"]
+                dependencies = depends_on if isinstance(depends_on, list) else [depends_on]
+                for dep in dependencies:
+                    if dep not in depending:
+                        depending[dep] = []
+                    depending[dep].append(name)
+        self.depending = depending
 
     async def up(self, services=None):
         # TODO, prepare/build phase (not necessarily here)

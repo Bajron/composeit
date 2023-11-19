@@ -10,7 +10,7 @@ services:
     command: echo foo bar %TEST2%
     shell: true
     environment:
-      - TEST2=test2
+      - TEST2=test2${FROM_ENV}
       - PATH
 
   ping_service1:
@@ -28,11 +28,14 @@ services:
     command: ping google.pl
     shell: true
     restart: on-failure
+    depends_on: ping_service2
 
   ping_service4:
-    command: ping google.com
+    command: ping -n ${MAX_REPEAT:-10} google.com
     shell: true
     restart: always
+    depends_on:
+      - ping_service3
 
   ping_no_log:
     inherit_environment: false
