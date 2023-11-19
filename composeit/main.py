@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import dotenv
+import asyncio
 from .compose import Compose
 
 
@@ -23,18 +24,33 @@ def main():
     parser.add_argument("--no-color", default=False, action="store_true")
 
     parser.add_argument(
-        "--test-server", default=None, help="Temporary option to perform GET with a provided URL on the server"
+        "--test-server",
+        default=None,
+        metavar="<PATH>",
+        help="Temporary option to perform GET with a provided URL on the server",
     )
     parser.add_argument(
-        "--test-server-post", default=None, help="Temporary option to perform POST with a provided URL on the server"
+        "--test-server-post",
+        default=None,
+        metavar="<PATH>",
+        help="Temporary option to perform POST with a provided URL on the server",
     )
 
-    subparsers = parser.add_subparsers(help="sub-command help")
+    subparsers = parser.add_subparsers(dest="command", help="sub-command help")
     parser_up = subparsers.add_parser("up", help="Startup the services")
     parser_up.add_argument("--build", default=False, action="store_true", help="Rebuild services")
     parser_up.add_argument("service", nargs="*", help="Specific service to start")
 
+    parser_up = subparsers.add_parser("start", help="Startup the services")
+    parser_up.add_argument("service", nargs="*", help="Specific service to start")
+
+    parser_up = subparsers.add_parser("build", help="Build the services")
+    parser_up.add_argument("service", nargs="*", help="Specific service to build")
+
     parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
+    parser_down.add_argument("service", nargs="*", help="Specific service to close")
+
+    parser_down = subparsers.add_parser("stop", help="Close and cleanup the services")
     parser_down.add_argument("service", nargs="*", help="Specific service to close")
 
     options = parser.parse_args()
@@ -44,9 +60,9 @@ def main():
         logging.basicConfig(level=logging.DEBUG)
         cfg_log.debug(f"Parsed options: {options}")
 
-    use_color=not options.no_color
+    use_color = not options.no_color
     if use_color and os.name == "nt":
-        cfg_log.debug(f"Running `os.system(\"color\")`")
+        cfg_log.debug(f'Running `os.system("color")`')
         os.system("color")
 
     working_directory = pathlib.Path(os.getcwd())
@@ -92,13 +108,26 @@ def main():
             print("Provided environment file does not exist", file=sys.stderr)
             return 1
 
-    compose = Compose(
-        project_name, working_directory, service_files, verbose=options.verbose, use_color=use_color
-    )
+    compose = Compose(project_name, working_directory, service_files, verbose=options.verbose, use_color=use_color)
 
     if options.test_server is not None:
         compose.test_server(options.test_server, "GET")
     elif options.test_server_post is not None:
         compose.test_server(options.test_server_post, "POST")
+    elif hasattr(options, "command") and options.command is not None:
+        services = None
+        if hasattr(options, "service") and len(options.service) > 0:
+            services = options.service
+
+        if options.command == "up":
+            asyncio.run(compose.up(services))
+        elif options.command == "start":
+            asyncio.run(compose.start(services))
+        elif options.command == "down":
+            asyncio.run(compose.down(services))
+        elif options.command == "stop":
+            asyncio.run(compose.stop(services))
+        else:
+            print(f"Unhandled option {options.command}")
     else:
-        compose.run()
+        parser.print_help()
