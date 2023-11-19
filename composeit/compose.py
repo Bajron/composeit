@@ -59,6 +59,9 @@ class Compose:
         self.logger = logging.getLogger(project_name)
         if self.verbose:
             self.logger.setLevel(logging.DEBUG)
+        else:
+            # TODO: fix formatting
+            self.logger.setLevel(logging.INFO)
 
         self.communication_pipe = get_comm_pipe(working_directory, project_name)
         self.logger.debug(f"Communication pipe: {self.communication_pipe}")
@@ -71,7 +74,8 @@ class Compose:
         self._parse_service_config()
 
         self.depending = None
-        self._update_depending()
+        self.depends = None
+        self._update_dependencies()
 
         self.services = {}
         self.app = None
@@ -93,21 +97,44 @@ class Compose:
         if self.verbose:
             pprint.pp(self.service_config)
 
-    def _update_depending(self):
-        depending = {}
-        for name, service in self.service_config["services"].items():
+    def _update_dependencies(self):
+        services = self.service_config["services"]
+        depending = {k: [] for k in services.keys()}
+        depends = {k: [] for k in services.keys()}
+
+        for name, service in services.items():
             if "depends_on" in service:
                 depends_on = service["depends_on"]
                 dependencies = depends_on if isinstance(depends_on, list) else [depends_on]
+                depends[name] = dependencies
                 for dep in dependencies:
-                    if dep not in depending:
-                        depending[dep] = []
+                    if dep not in services:
+                        raise Exception(f"Dependency {dep} not found")
                     depending[dep].append(name)
+
         self.depending = depending
+        self.depends = depends
+
+    def get_start_sequence(self, service, resolving: set = None):
+        if resolving is not None:
+            if service in resolving:
+                raise Exception(f"Cyclic dependency ({service})")
+            resolving.add(service)
+        else:
+            resolving = {service}
+
+        seq = []
+        for d in self.depends[service]:
+            seq += self.get_start_sequence(d)
+
+        resolving.remove(service)
+
+        # TODO? the sequence can have repeats now
+        return [service] + seq
 
     async def up(self, services=None):
         # TODO, prepare/build phase (not necessarily here)
-        self.logger.debug("Preparing services is not implemented")
+        self.logger.warning("Preparing services is not implemented")
 
         await self.start(services=services)
 
@@ -152,7 +179,7 @@ class Compose:
         await self.stop(services=services)
 
         # TODO, clean/down phase (not necessarily here)
-        self.logger.debug("Tearing down services is not implemented")
+        self.logger.warning("Tearing down services is not implemented")
 
     async def stop(self, services=None):
         server_up = await self.check_server_is_running()

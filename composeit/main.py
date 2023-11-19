@@ -59,6 +59,8 @@ def main():
         print(" ** Verbose **", file=sys.stderr)
         logging.basicConfig(level=logging.DEBUG)
         cfg_log.debug(f"Parsed options: {options}")
+    else:
+        logging.basicConfig(level=logging.INFO)
 
     use_color = not options.no_color
     if use_color and os.name == "nt":
