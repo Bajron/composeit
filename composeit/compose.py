@@ -10,9 +10,11 @@ import io
 import pathlib
 import hashlib
 from aiohttp import web, ClientConnectorError
-from .process import AsyncProcess
 
-import pprint
+from typing import List
+
+from .process import AsyncProcess
+from .graph import topological_sequence
 
 from socket import gethostname
 
@@ -94,9 +96,6 @@ class Compose:
 
         self.service_config = resolve(parsed_data)
 
-        if self.verbose:
-            pprint.pp(self.service_config)
-
     def _update_dependencies(self):
         services = self.service_config["services"]
         depending = {k: [] for k in services.keys()}
@@ -115,22 +114,11 @@ class Compose:
         self.depending = depending
         self.depends = depends
 
-    def get_start_sequence(self, service, resolving: set = None):
-        if resolving is not None:
-            if service in resolving:
-                raise Exception(f"Cyclic dependency ({service})")
-            resolving.add(service)
-        else:
-            resolving = {service}
+    def get_start_sequence(self, services: List[str]):
+        return topological_sequence(services, self.depends)
 
-        seq = []
-        for d in self.depends[service]:
-            seq += self.get_start_sequence(d)
-
-        resolving.remove(service)
-
-        # TODO? the sequence can have repeats now
-        return [service] + seq
+    def get_stop_sequence(self, services: List[str]):
+        return topological_sequence(services, self.depending)
 
     async def up(self, services=None):
         # TODO, prepare/build phase (not necessarily here)
@@ -265,13 +253,16 @@ class Compose:
     async def post_stop_service(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
-        self.services[service].stop()
+        for s in self.get_stop_sequence([service]):
+            self.services[s].stop()
         return web.json_response("Stopped")
 
     async def post_start_service(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
-        message = "Started" if self.services[service].start() else "Running"
+        for s in self.get_start_sequence([service]):
+            # Last one in the sequence should be `service`
+            message = "Started" if self.services[s].start() else "Running"
         return web.json_response(message)
 
     def start_server(self):
@@ -291,8 +282,8 @@ class Compose:
 
     def shutdown(self):
         self.logger.info(" *** Calling terminate on sub processes")
-        for service in self.services.values():
-            service.terminate()
+        for service in self.get_stop_sequence(self.services.keys()):
+            self.services[service].terminate()
 
     async def watch_services(self, start_services=None):
         services: list[AsyncProcess] = []
@@ -302,7 +293,10 @@ class Compose:
                 name: AsyncProcess(i, name, service_config, self._get_next_color())
                 for (i, (name, service_config)) in enumerate(self.service_config["services"].items())
             }
-            services = list(self.services.values())
+
+            if self.verbose:
+                for s in self.services.values():
+                    s.log.setLevel(logging.DEBUG)
 
             def signal_handler(signal, frame):
                 asyncio.get_event_loop().call_soon_threadsafe(self.shutdown)
@@ -312,13 +306,12 @@ class Compose:
             # asyncio.get_event_loop().add_signal_handler(signal.SIGINT, signal_handler)
 
             if start_services is None:
-                for service in services:
-                    service.start()
-            else:
-                for name in start_services:
-                    self.services[name].start()
+                start_services = list(self.services.keys())
 
-            await asyncio.gather(*[s.watch() for s in services])
+            for name in self.get_start_sequence(start_services):
+                self.services[name].start()
+
+            await asyncio.gather(*[s.watch() for s in self.services.values()])
         finally:
             self.shutdown()
 
@@ -403,12 +396,15 @@ async def run_server(app: Application, path: str, delete_pipe=True):
 
         app = cast(Application, app)
 
+        logger = logging.getLogger("httpserver")
+        logger.setLevel(logging.DEBUG)
+
         runner = AppRunner(
             app,
             handle_signals=True,
             access_log_class=AccessLogger,
             access_log_format=AccessLogger.LOG_FORMAT,
-            access_log=logging.getLogger("httpserver"),
+            access_log=logger,
             keepalive_timeout=75,
         )
         await runner.setup()

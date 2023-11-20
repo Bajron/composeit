@@ -5,6 +5,9 @@ import sys
 import logging
 import dotenv
 import asyncio
+import pprint
+
+
 from .compose import Compose
 
 
@@ -53,12 +56,15 @@ def main():
     parser_down = subparsers.add_parser("stop", help="Close and cleanup the services")
     parser_down.add_argument("service", nargs="*", help="Specific service to close")
 
+    parser_config = subparsers.add_parser("config", help="Show services config")
+
     options = parser.parse_args()
 
     if options.verbose:
         print(" ** Verbose **", file=sys.stderr)
         logging.basicConfig(level=logging.DEBUG)
         cfg_log.debug(f"Parsed options: {options}")
+        cfg_log.debug(f"os.name = {os.name}")
     else:
         logging.basicConfig(level=logging.INFO)
 
@@ -129,6 +135,8 @@ def main():
             asyncio.run(compose.down(services))
         elif options.command == "stop":
             asyncio.run(compose.stop(services))
+        elif options.command == "config":
+            pprint.pprint(compose.service_config)
         else:
             print(f"Unhandled option {options.command}")
     else:

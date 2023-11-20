@@ -159,14 +159,15 @@ class AsyncProcess:
         self.rc = await self.process.wait()
 
     async def _resolve_restart(self):
-        print(f"Resolving restart for {self.name}", self.terminated, self.stopped)
+        self.log.debug(f"Resolving restart for {self.name}, terminated={self.terminated}, stopped={self.stopped}")
         if self.terminated:
             return False
 
         if self.restart == "always":
-            await self._restart()
-        elif self.restart == "unless-stopped" and not self.stopped:
-            # TODO this would make more sense with side control and daemon mode
+            self.log.warning("Restart policy 'always' behaves like 'unless-stopped'")
+            # 'always' from docker-compose does not make sense without a global daemon
+
+        if self.restart in ["always", "unless-stopped"] and not self.stopped:
             await self._restart()
         elif self.restart == "on-failure" and self.rc != 0:
             await self._restart()
@@ -198,6 +199,7 @@ class AsyncProcess:
 
     def start(self):
         if self.stopped:
+            self.log.debug("Starting")
             self.stopped = False
             self.startup_semaphore.release()
             return True
@@ -214,8 +216,10 @@ class AsyncProcess:
         self.process = await self.process_initialization
 
     def stop(self):
+        self.log.debug("Stopping")
         self.stopped = True
         if self.rc is None and self.process is not None:
+            self.log.debug("Sending terminate signal")
             self.process.terminate()
 
     def terminate(self):
