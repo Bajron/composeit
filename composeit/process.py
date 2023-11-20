@@ -31,8 +31,8 @@ class AsyncProcess:
         self.process_initialization = None
         self.process: asyncio.subprocess.Process = None
 
-        self.restart = service_config.get("restart", "no")
-        assert self.restart in RestartPolicyOptions
+        self.restart_policy = service_config.get("restart", "no")
+        assert self.restart_policy in RestartPolicyOptions
 
         self.color = color
 
@@ -123,6 +123,7 @@ class AsyncProcess:
                 print(" ** args ignored with a shell command")
             process = await asyncio.create_subprocess_shell(
                 cmd=service_config["command"],
+                stdin=asyncio.subprocess.PIPE,
                 stderr=stream_mode,
                 stdout=stream_mode,
                 **popen_kw,
@@ -134,7 +135,9 @@ class AsyncProcess:
                 else [service_config["command"]]
             )
             command.extend(service_config.get("args", []))
-            process = await asyncio.create_subprocess_exec(*command, stderr=stream_mode, stdout=stream_mode, **popen_kw)
+            process = await asyncio.create_subprocess_exec(
+                *command, stdin=asyncio.subprocess.PIPE, stderr=stream_mode, stdout=stream_mode, **popen_kw
+            )
         return process
 
     def _output(self, sep: str, message: str):
@@ -163,13 +166,9 @@ class AsyncProcess:
         if self.terminated:
             return False
 
-        if self.restart == "always":
-            self.log.warning("Restart policy 'always' behaves like 'unless-stopped'")
-            # 'always' from docker-compose does not make sense without a global daemon
-
-        if self.restart in ["always", "unless-stopped"] and not self.stopped:
+        if self.restart_policy in ["always", "unless-stopped"] and not self.stopped:
             await self._restart()
-        elif self.restart == "on-failure" and self.rc != 0:
+        elif self.restart_policy == "on-failure" and self.rc != 0:
             await self._restart()
         else:
             return False
@@ -190,7 +189,7 @@ class AsyncProcess:
                     await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
                     self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
 
-                    self.log.info(f"Restart policy is {self.restart}")
+                    self.log.info(f"Restart policy is {self.restart_policy}")
                     process_started = await self._resolve_restart()
             except FileNotFoundError as ex:
                 self.log.error(f"Error running command {self.name} {ex}")

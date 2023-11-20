@@ -11,7 +11,7 @@ import pathlib
 import hashlib
 from aiohttp import web, ClientConnectorError
 
-from typing import List
+from typing import List, Dict
 
 from .process import AsyncProcess
 from .graph import topological_sequence
@@ -79,7 +79,7 @@ class Compose:
         self.depends = None
         self._update_dependencies()
 
-        self.services = {}
+        self.services: Dict[str, AsyncProcess] = {}
         self.app = None
 
     def _get_next_color(self):
@@ -175,6 +175,9 @@ class Compose:
             await self.run_client_session(self.make_stop_session(services))
         else:
             self.logger.error("Server is not running")
+
+    def get_always_restart_services(self):
+        return [name for name, service in self.services.items() if service.restart_policy == "always"]
 
     def make_stop_session(self, services=None):
         async def run_client_commands(connector):
@@ -286,7 +289,6 @@ class Compose:
             self.services[service].terminate()
 
     async def watch_services(self, start_services=None):
-        services: list[AsyncProcess] = []
         try:
             self.start_server()
             self.services = {
@@ -307,6 +309,11 @@ class Compose:
 
             if start_services is None:
                 start_services = list(self.services.keys())
+            else:
+                additional = self.get_always_restart_services()
+                if len(additional) > 0:
+                    self.logger.debug(f"Services with restart policy 'always' are started as well: {additional}")
+                start_services += additional
 
             for name in self.get_start_sequence(start_services):
                 self.services[name].start()
