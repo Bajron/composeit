@@ -9,6 +9,7 @@ import aiohttp
 import io
 import pathlib
 import hashlib
+import copy
 from aiohttp import web, ClientConnectorError
 
 from typing import List, Dict
@@ -87,12 +88,8 @@ class Compose:
 
     def _parse_service_config(self):
         # TODO: handle multiple files, merging checks
-        for file in self.service_files:
-            parsed_data = yaml.load(file.open(), Loader=UniqueKeyLoader)
-            for s in parsed_data["services"]:
-                print(s)
-                print(parsed_data["services"][s])
-            break  # FIXME
+        parsed_files = [yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.service_files]
+        parsed_data = merge_configs(parsed_files)
 
         self.service_config = resolve(parsed_data)
 
@@ -442,3 +439,51 @@ def get_comm_pipe(directory_path: pathlib.Path, project_name: str = None):
         return r"\\.\pipe\composeit_" + f"{project_name}_{h}"
 
     return str(directory_path / ".daemon")
+
+
+def merge_configs(parsed_files):
+    base = copy.deepcopy(parsed_files[0])
+    for i in range(1, len(parsed_files)):
+        base = merge_in(base, parsed_files[i])
+    return base
+
+
+def merge_in(base, incoming):
+    # TODO any other top level keys?
+    base_svcs = base["services"]
+    for name, service in incoming["services"].items():
+        if name not in base_svcs:
+            base_svcs[name] = service
+        else:
+            base_svcs[name] = merge_services(base_svcs[name], service)
+    return base
+
+
+def merge_services(base, incoming):
+    for key, value in incoming.items():
+        if key not in base:
+            base[key] = value
+        else:
+            base_value = base[key]
+            # TODO bulid and clean needs special rule
+            if key in ["command"]:  # TODO: which commands not to merge?
+                base[key] = value
+            elif isinstance(base_value, list):
+                if isinstance(value, list):
+                    base_value += value
+                elif isinstance(value, dict):
+                    print("TODO list vs dict")  # env case? TODO: normalize env to something?
+                else:
+                    base_balue += [value]
+            elif isinstance(base_value, dict):
+                if isinstance(value, dict):
+                    base_value.update(value)
+                elif isinstance(value, list):
+                    print("TODO dict vs list")  # env case? TODO: normalize env to something?
+                else:
+                    # TODO just throw? this is weird
+                    print("dict vs value")
+                    base_value[value] = None
+            else:
+                base[key] = value
+    return base

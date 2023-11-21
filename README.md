@@ -142,6 +142,33 @@ python:
 - `build` - Could be preparing the process.
     For example several commands to produce a binary.
     Perhaps should be just a single command? (we still have scripting)
+    Having a `clean` would be nice as well
+```
+  foo:
+    build:
+      shell_sequence: # good to introduce to change the method later
+        #- git clone ...?
+        - mkdir "${DST}"
+        - cmake -S "${SRC}" -B "${DST}" -D "CMAKE_BUILD_TYPE=${TYPE}"
+        - cmake --build "${DST}" --config "${TYPE}" "${@}"
+    clean:
+      shell_sequence:
+        - rm "${DST}" -rf
+
+  bar:
+    build:
+      shell_sequence:
+        - pip install xx  # this is interesting, which pip?
+    clean:
+      shell_sequence:
+        - pip uninstall xx
+
+  baz:
+    build:
+      shell_sequence:
+        - cd xx && cargo build
+```
+
 - OS dependant behavior?
 
 
