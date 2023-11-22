@@ -22,10 +22,23 @@ RestartPolicyOptions = ["no", "always", "on-failure", "unless-stopped"]
 
 
 class AsyncProcess:
-    def __init__(self, sequence: int, name: str, service_config: dict, color: str):
+    def __init__(
+        self,
+        sequence: int,
+        name: str,
+        service_config: dict,
+        color: str,
+        execute: bool = True,
+        execute_build: bool = False,
+        execute_clean: bool = False,
+    ):
         self.sequence = sequence
         self.name = name
         self.service_config = service_config
+
+        self.execute = execute
+        self.execute_build = execute_build
+        self.execute_clean = execute_clean
 
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
@@ -65,6 +78,9 @@ class AsyncProcess:
         self.terminated = False
         self.stopped = True
         self.exception = None
+
+    def request_clean(self):
+        self.execute_clean = True
 
     async def _make_process(self):
         service_config = self.service_config
@@ -109,6 +125,14 @@ class AsyncProcess:
 
         self.popen_kw = popen_kw = {"env": env}
 
+        # TODO: Process started with shell kills cmd, but child persists...
+
+        # if os.name == 'nt':
+        #     CREATE_NEW_PROCESS_GROUP = 0x00000200
+        #     popen_kw.update(creationflags=CREATE_NEW_PROCESS_GROUP)
+        # else:
+        #     popen_kw.update(start_new_session=True)
+
         if "working_dir" in service_config:
             popen_kw["cwd"] = service_config["working_dir"]
 
@@ -146,17 +170,23 @@ class AsyncProcess:
             s = colored(s, self.color)
         print(s, end="")
 
-    async def watch_stderr(self):
-        if self.process.stderr is None:
+    async def watch_stderr(self, process: asyncio.subprocess.Process):
+        if process.stderr is None:
             return
-        async for l in self.process.stderr:
-            self.lerr.info(l.decode())
+        async for l in process.stderr:
+            try:
+                self.lerr.info(l.decode(errors='ignore'))
+            except UnicodeDecodeError as ex:
+                self.log.warning(f"Cannot decode stderr line: {ex}")
 
-    async def watch_stdout(self):
-        if self.process.stdout is None:
+    async def watch_stdout(self, process: asyncio.subprocess.Process):
+        if process.stdout is None:
             return
-        async for l in self.process.stdout:
-            self.lout.info(l.decode())
+        async for l in process.stdout:
+            try:
+                self.lout.info(l.decode(errors='ignore'))
+            except UnicodeDecodeError as ex:
+                self.log.warning(f"Cannot decode stdout line: {ex}")
 
     async def wait_for_code(self):
         self.rc = await self.process.wait()
@@ -175,9 +205,14 @@ class AsyncProcess:
         return True
 
     async def watch(self):
-        while not self.terminated:
+        # TODO: think, build here or in the loop and `self.execute_build = False` after ?
+        if self.execute_build:
+            await self.build()
+
+        while self.execute and not self.terminated:
             await self.startup_semaphore.acquire()
-            if self.terminated:
+            # While waiting for start, one can call build() or terminate()
+            if self.terminated or not self.execute:
                 return
 
             try:
@@ -186,7 +221,9 @@ class AsyncProcess:
 
                 while process_started:
                     await self.started()
-                    await asyncio.gather(self.wait_for_code(), self.watch_stderr(), self.watch_stdout())
+                    await asyncio.gather(
+                        self.wait_for_code(), self.watch_stderr(self.process), self.watch_stdout(self.process)
+                    )
                     self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
 
                     self.log.info(f"Restart policy is {self.restart_policy}")
@@ -196,8 +233,63 @@ class AsyncProcess:
                 self.exception = ex
                 break
 
-    def start(self):
+        self.log.debug("Restart loop exited")
+
+        if self.execute_clean:
+            await self.clean()
+
+    async def build(self):
+        build_rc = await self._build()
+        if build_rc != 0:
+            self.log("Build failed")
+            self.execute = False
+        return build_rc
+
+    async def _build(self):
+        if "build" in self.service_config:
+            b = self.service_config["build"]
+            if "shell_sequence" in b:
+                self.log.debug("Processing build sequence")
+                for cmd in b["shell_sequence"]:
+                    rc = await self.execute_command(cmd)
+                    if rc != 0:
+                        self.log.warning(f"Build sequence interrupted with error")
+                        break
+                return rc
+        return 0
+
+    async def clean(self):
+        if "clean" in self.service_config:
+            c = self.service_config["clean"]
+            if "shell_sequence" in c:
+                self.log.debug("Processing cleanup sequence")
+                for cmd in c["shell_sequence"]:
+                    await self.execute_command(cmd)
+
+    async def execute_command(self, cmd):
+        # NOTE: this one should not be supressed by logging: none
+        stream_mode = asyncio.subprocess.PIPE
+
+        if isinstance(cmd, list):
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdin=asyncio.subprocess.PIPE, stderr=stream_mode, stdout=stream_mode
+            )
+        else:
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stderr=stream_mode,
+                stdout=stream_mode,
+            )
+
+        await asyncio.gather(self.watch_stderr(process), self.watch_stdout(process))
+        return await process.wait()
+
+    def start(self, request_build=False):
         if self.stopped:
+            if request_build:
+                self.build()
+
             self.log.debug("Starting")
             self.stopped = False
             self.startup_semaphore.release()
@@ -218,11 +310,14 @@ class AsyncProcess:
         self.log.debug("Stopping")
         self.stopped = True
         if self.rc is None and self.process is not None:
-            self.log.debug("Sending terminate signal")
+            self.log.debug("Sending terminate signal for stop")
             self.process.terminate()
 
     def terminate(self):
+        self.log.debug(f"Terminating, rc:{self.rc}, process:{self.process}")
         self.terminated = True
         if self.rc is None and self.process is not None:
+            self.process.stdin.close()
+            self.log.debug("Sending terminate signal for terminate")
             self.process.terminate()
         self.startup_semaphore.release()

@@ -1,0 +1,24 @@
+services:
+  echo_service:
+    build:
+      shell_sequence:
+        - echo foo > prep.log
+        - dir
+    clean:
+      shell_sequence:
+        - del prep.log
+        - dir
+    shell: true
+    command: "more prep.log && ping wp.pl"
+    restart: always
+  # This one is problematic to kill...
+  echo_service2:
+    command: ping -t %TARGET%
+    shell: true
+    environment:
+      - TARGET=onet.pl
+  ping:
+    command: ping
+    args:
+      - -t
+      - google.pl
