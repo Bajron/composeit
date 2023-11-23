@@ -1,7 +1,10 @@
 import logging
 import asyncio
+import psutil
 import os
 import sys
+import subprocess
+import time
 import dotenv
 import io
 from termcolor import colored
@@ -125,14 +128,6 @@ class AsyncProcess:
 
         self.popen_kw = popen_kw = {"env": env}
 
-        # TODO: Process started with shell kills cmd, but child persists...
-
-        # if os.name == 'nt':
-        #     CREATE_NEW_PROCESS_GROUP = 0x00000200
-        #     popen_kw.update(creationflags=CREATE_NEW_PROCESS_GROUP)
-        # else:
-        #     popen_kw.update(start_new_session=True)
-
         if "working_dir" in service_config:
             popen_kw["cwd"] = service_config["working_dir"]
 
@@ -141,10 +136,19 @@ class AsyncProcess:
             if pt in service_config:
                 popen_kw[pt] = service_config[pt]
 
+        # TODO: Process started with shell kills cmd, but child persists...
+
+        # NOTE: This is here to prevent sending CTRL_C_EVENT to children
+        if os.name == "nt":
+            popen_kw.update(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        # else: # TODO: not sure yet if required on Linux, could be helpful for closing children
+        #     popen_kw.update(start_new_session=True)
+
         if service_config.get("shell", False):
             # TODO, injections?
             if "args" in service_config:
                 print(" ** args ignored with a shell command")
+
             process = await asyncio.create_subprocess_shell(
                 cmd=service_config["command"],
                 stdin=asyncio.subprocess.PIPE,
@@ -175,7 +179,7 @@ class AsyncProcess:
             return
         async for l in process.stderr:
             try:
-                self.lerr.info(l.decode(errors='ignore'))
+                self.lerr.info(l.decode(errors="ignore"))
             except UnicodeDecodeError as ex:
                 self.log.warning(f"Cannot decode stderr line: {ex}")
 
@@ -184,7 +188,7 @@ class AsyncProcess:
             return
         async for l in process.stdout:
             try:
-                self.lout.info(l.decode(errors='ignore'))
+                self.lout.info(l.decode(errors="ignore"))
             except UnicodeDecodeError as ex:
                 self.log.warning(f"Cannot decode stdout line: {ex}")
 
@@ -210,6 +214,8 @@ class AsyncProcess:
             await self.build()
 
         while self.execute and not self.terminated:
+            # TODO we go back here after stop, so all services stopped can hang here
+            self.log.debug("Awaiting start signal")
             await self.startup_semaphore.acquire()
             # While waiting for start, one can call build() or terminate()
             if self.terminated or not self.execute:
@@ -311,13 +317,33 @@ class AsyncProcess:
         self.stopped = True
         if self.rc is None and self.process is not None:
             self.log.debug("Sending terminate signal for stop")
-            self.process.terminate()
+            self._terminate()
+
+    def _terminate(self):
+        try:
+            children = psutil.Process(self.process.pid).children(recursive=True)
+        except psutil.NoSuchProcess as ex:
+            self.log.warning(f"Process already closed {ex}")
+            children = []
+        self.process.stdin.close()
+        self.process.terminate()
+
+        # Tries to fix the leftover processes on Windows
+        # Could be different with process group on Linux
+        time.sleep(0)
+
+        # TODO wait for a while until children are running? Then terminate
+        # will block the thread...
+
+        for child in children:
+            if child.is_running():
+                self.log.warning(f"Terminating leftover child process {child}")
+                child.terminate()
 
     def terminate(self):
         self.log.debug(f"Terminating, rc:{self.rc}, process:{self.process}")
         self.terminated = True
         if self.rc is None and self.process is not None:
-            self.process.stdin.close()
             self.log.debug("Sending terminate signal for terminate")
-            self.process.terminate()
+            self._terminate()
         self.startup_semaphore.release()

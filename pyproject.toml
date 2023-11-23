@@ -20,6 +20,7 @@ dependencies = [
     "pyyaml",
     "termcolor",
     "aiohttp",
+    "psutil",
     "python-dotenv",
 ]
 [project.optional-dependencies]

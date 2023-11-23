@@ -17,6 +17,9 @@ services:
     shell: true
     environment:
       - TARGET=onet.pl
+  echo_service3:
+    command: ping -t rmf.pl
+    shell: true
   ping:
     command: ping
     args:
