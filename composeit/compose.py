@@ -366,8 +366,8 @@ class Compose:
             self.logger.debug("Waiting for services")
             await asyncio.gather(*[s.watch() for s in self.services.values()])
             self.logger.debug("Services closed")
-        except:
-            self.logger.debug("Exception during watching services")
+        except Exception as ex:
+            self.logger.debug(f"Exception during watching services: {ex}")
             self.shutdown()
 
     def side_action(self, action):

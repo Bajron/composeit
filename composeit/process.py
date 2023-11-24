@@ -8,6 +8,9 @@ import time
 import dotenv
 import io
 from termcolor import colored
+from .utils import duration_to_seconds
+
+import traceback
 
 
 def make_colored(color):
@@ -46,9 +49,18 @@ class AsyncProcess:
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
         self.process: asyncio.subprocess.Process = None
+        self.watch_coro = None
+        self.sleep_task = None
 
         self.restart_policy = service_config.get("restart", "no")
         assert self.restart_policy in RestartPolicyOptions
+
+        self.restart_policy_config = {
+            "delay": 5,
+            "max_attempts": "infinite",
+            "window": 0,
+        }
+        self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
         self.color = color
 
@@ -199,17 +211,46 @@ class AsyncProcess:
         self.rc = await self.process.wait()
 
     async def _resolve_restart(self):
-        self.log.debug(f"Resolving restart for {self.name}, terminated={self.terminated}, stopped={self.stopped}")
-        if self.terminated:
-            return False
+        max_attempts = self.restart_policy_config["max_attempts"]
+        attempt = 1
+        self.log.debug(
+            f"Resolving restart for {self.name}, attempt={attempt}, terminated={self.terminated}, stopped={self.stopped}"
+        )
 
-        if self.restart_policy in ["always", "unless-stopped"] and not self.stopped:
-            await self._restart()
-        elif self.restart_policy == "on-failure" and self.rc != 0:
-            await self._restart()
-        else:
-            return False
-        return True
+        while max_attempts == "infinite" or attempt < max_attempts:
+            if self.terminated:
+                return False
+
+            if self.restart_policy in ["always", "unless-stopped"] and not self.stopped:
+                restarted = await self._restart_process()
+            elif self.restart_policy == "on-failure" and self.rc != 0:
+                restarted = await self._restart_process()
+            else:
+                return False
+
+            # Most likely terminate() happened
+            if not restarted:
+                continue
+
+            await self.started()
+            success_after = duration_to_seconds(self.restart_policy_config["window"])
+            if success_after <= 0:
+                return True
+
+            try:
+                self.log.debug(f"Verifying successful startup for {success_after} seconds")
+                # Prevent cancelation
+                shielded_watch = asyncio.shield(self.watch_coro)
+                await asyncio.wait_for(shielded_watch, success_after)
+            except asyncio.exceptions.TimeoutError:
+                # Success, it did not finish in the requested time
+                self.log.debug(f"Restart successful")
+                return True
+
+            attempt += 1
+
+        self.log.error(f"Restarting gave up after {max_attempts} attempts")
+        return False
 
     async def watch(self):
         await self.resolve_build()
@@ -228,14 +269,12 @@ class AsyncProcess:
             try:
                 process_started = False
                 if self.execute:
-                    await self._restart()
+                    await self._start_process()
+                    await self.started()
                     process_started = True
 
                 while process_started:
-                    await self.started()
-                    await asyncio.gather(
-                        self.wait_for_code(), self.watch_stderr(self.process), self.watch_stdout(self.process)
-                    )
+                    await self.watch_coro
                     self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
 
                     self.log.info(f"Restart policy is {self.restart_policy}")
@@ -244,7 +283,10 @@ class AsyncProcess:
                 self.log.error(f"Error running command {self.name} {ex}")
                 self.exception = ex
                 break
-
+            except Exception as ex:
+                traceback.print_exc()
+                self.log.error(f"Exception '{ex}'")
+                raise
             await self.resolve_clean()
 
         self.log.debug("Restart loop exited")
@@ -333,13 +375,43 @@ class AsyncProcess:
             self.log.warning("Does not seem to be stopped")
             return False
 
-    async def _restart(self):
+    async def _start_process(self):
         self.rc = None
         self.process = None
         self.process_initialization = self._make_process()
 
+    def _cancel_sleep(self):
+        if self.sleep_task is not None:
+            self.sleep_task.cancel()
+
+    async def _sleep(self, seconds):
+        try:
+            self.sleep_task = asyncio.create_task(asyncio.sleep(seconds))
+            await self.sleep_task
+        except asyncio.exceptions.CancelledError:
+            pass
+
+    async def _restart_process(self):
+        sleep_time = self.restart_policy_config["delay"]
+        self.log.debug(f"Waiting for {sleep_time} seconds before restarting")
+
+        await self._sleep(duration_to_seconds(sleep_time))
+
+        # Check after a long sleep
+        if self.terminated:
+            return False
+
+        await self._start_process()
+        return True
+
+    def _make_watch_coro(self):
+        self.watch_coro = asyncio.gather(
+            self.wait_for_code(), self.watch_stderr(self.process), self.watch_stdout(self.process)
+        )
+
     async def started(self):
         self.process = await self.process_initialization
+        self._make_watch_coro()
 
     async def stop(self, request_clean=None):
         if request_clean != None:
@@ -365,8 +437,15 @@ class AsyncProcess:
 
         # Tries to fix the leftover processes on Windows
         # Could be different with process group on Linux
+
         for i in range(10):
-            time.sleep(0)
+            running = 0
+            for child in children:
+                if child.is_running():
+                    running += 1
+                    time.sleep(0)
+            if running == len(children):
+                break
 
         # TODO wait for a while until children are running? Then terminate
         # will block the thread...
@@ -379,6 +458,7 @@ class AsyncProcess:
     def terminate(self):
         self.log.debug(f"Terminating, rc:{self.rc}, process:{self.process}")
         self.terminated = True
+        self._cancel_sleep()
         if self.rc is None and self.process is not None:
             self.log.debug("Sending terminate signal for terminate")
             self._terminate()

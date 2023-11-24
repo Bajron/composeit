@@ -11,6 +11,8 @@ services:
     shell: true
     command: "more prep.log && ping wp.pl"
     restart: always
+    restart_policy:
+      window: 1
   # This one is problematic to kill...
   echo_service2:
     command: ping -t %TARGET%
