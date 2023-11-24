@@ -85,6 +85,9 @@ class AsyncProcess:
     def request_clean(self):
         self.execute_clean = True
 
+    def request_build(self):
+        self.execute_build = True
+
     async def _make_process(self):
         service_config = self.service_config
 
@@ -209,21 +212,24 @@ class AsyncProcess:
         return True
 
     async def watch(self):
-        # TODO: think, build here or in the loop and `self.execute_build = False` after ?
-        if self.execute_build:
-            await self.build()
+        await self.resolve_build()
 
         while self.execute and not self.terminated:
-            # TODO we go back here after stop, so all services stopped can hang here
+            # NOTE: We go back here after stop.
+            #       All services can hang here by design
             self.log.debug("Awaiting start signal")
             await self.startup_semaphore.acquire()
             # While waiting for start, one can call build() or terminate()
             if self.terminated or not self.execute:
                 return
 
+            await self.resolve_build()
+
             try:
-                await self._restart()
-                process_started = True
+                process_started = False
+                if self.execute:
+                    await self._restart()
+                    process_started = True
 
                 while process_started:
                     await self.started()
@@ -239,16 +245,23 @@ class AsyncProcess:
                 self.exception = ex
                 break
 
+            await self.resolve_clean()
+
         self.log.debug("Restart loop exited")
+        await self.resolve_clean()
 
-        if self.execute_clean:
-            await self.clean()
+    async def resolve_build(self):
+        if not self.execute_build:
+            return 0
 
-    async def build(self):
         build_rc = await self._build()
         if build_rc != 0:
             self.log("Build failed")
             self.execute = False
+            self.execute_build = True
+        else:
+            # It is one time action, need to reschedule for repeat
+            self.execute_build = False
         return build_rc
 
     async def _build(self):
@@ -264,13 +277,29 @@ class AsyncProcess:
                 return rc
         return 0
 
-    async def clean(self):
+    async def resolve_clean(self):
+        if not self.execute_clean:
+            return
+        rc = await self._clean()
+        if rc != 0:
+            self.log.warning("Cleanup failed")
+            # No success, try again
+            self.execute_clean = True
+        else:
+            self.execute_clean = False
+
+    async def _clean(self):
+        worst_rc = 0
         if "clean" in self.service_config:
             c = self.service_config["clean"]
             if "shell_sequence" in c:
                 self.log.debug("Processing cleanup sequence")
                 for cmd in c["shell_sequence"]:
-                    await self.execute_command(cmd)
+                    rc = await self.execute_command(cmd)
+                    if rc != 0 and worst_rc == 0:
+                        worst_rc = rc
+                        # We continue to cleanup as much as possible
+        return worst_rc
 
     async def execute_command(self, cmd):
         # NOTE: this one should not be supressed by logging: none
@@ -291,10 +320,10 @@ class AsyncProcess:
         await asyncio.gather(self.watch_stderr(process), self.watch_stdout(process))
         return await process.wait()
 
-    def start(self, request_build=False):
+    def start(self, request_build=None):
         if self.stopped:
-            if request_build:
-                self.build()
+            if request_build != None:
+                self.execute_build = request_build
 
             self.log.debug("Starting")
             self.stopped = False
@@ -312,7 +341,13 @@ class AsyncProcess:
     async def started(self):
         self.process = await self.process_initialization
 
-    def stop(self):
+    async def stop(self, request_clean=None):
+        if request_clean != None:
+            self.request_clean = request_clean
+
+        if self.stopped and self.request_clean:
+            await self.resolve_clean()
+
         self.log.debug("Stopping")
         self.stopped = True
         if self.rc is None and self.process is not None:
@@ -330,7 +365,8 @@ class AsyncProcess:
 
         # Tries to fix the leftover processes on Windows
         # Could be different with process group on Linux
-        time.sleep(0)
+        for i in range(10):
+            time.sleep(0)
 
         # TODO wait for a while until children are running? Then terminate
         # will block the thread...

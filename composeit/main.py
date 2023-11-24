@@ -53,8 +53,11 @@ def main():
     parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
     parser_down.add_argument("service", nargs="*", help="Specific service to close")
 
-    parser_down = subparsers.add_parser("stop", help="Close and cleanup the services")
-    parser_down.add_argument("service", nargs="*", help="Specific service to close")
+    parser_stop = subparsers.add_parser("stop", help="Close the services")
+    parser_stop.add_argument("service", nargs="*", help="Specific service to close")
+
+    parser_build = subparsers.add_parser("build", help="Builds services")
+    parser_build.add_argument("service", nargs="*", help="Specific service to build")
 
     parser_config = subparsers.add_parser("config", help="Show services config")
 
@@ -131,6 +134,8 @@ def main():
             asyncio.run(compose.up(services))
         elif options.command == "start":
             asyncio.run(compose.start(services))
+        elif options.command == "build":
+            asyncio.run(compose.build(services))
         elif options.command == "down":
             asyncio.run(compose.down(services))
         elif options.command == "stop":

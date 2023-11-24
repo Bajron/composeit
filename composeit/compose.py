@@ -117,6 +117,9 @@ class Compose:
     def get_stop_sequence(self, services: List[str]):
         return topological_sequence(services, self.depending)
 
+    async def build(self, services=None):
+        await self.watch_services(start_server=False, start_services=services, execute=False, execute_build=True)
+
     async def up(self, services=None):
         await self.start(services=services, execute_build=True)
 
@@ -127,7 +130,7 @@ class Compose:
         else:
             await self.watch_services(start_services=services, execute_build=execute_build)
 
-    def make_start_session(self, services=None, execute_build=False):
+    def make_start_session(self, services=None, request_build=False):
         async def run_client_commands(connector):
             async with aiohttp.ClientSession(connector=connector) as session:
                 hostname = gethostname()
@@ -151,7 +154,7 @@ class Compose:
 
                 for service in to_request:
                     response = await session.post(
-                        f"http://{hostname}/{project}/{service}/start", json={"execute_build": execute_build}
+                        f"http://{hostname}/{project}/{service}/start", json={"request_build": request_build}
                     )
                     if response.status == 200:
                         print(service, await response.json())
@@ -278,7 +281,7 @@ class Compose:
         for s in self.get_stop_sequence([service]):
             if request_clean:
                 self.services[s].request_clean()
-            self.services[s].stop()
+            await self.services[s].stop()
         return web.json_response("Stopped")
 
     async def post_start_service(self, request: web.Request):
@@ -290,8 +293,10 @@ class Compose:
             body = {}
         request_build = body.get("request_build", False)
         for s in self.get_start_sequence([service]):
+            if request_build:
+                self.services[s].request_build()
             # Last one in the sequence should be `service`
-            message = "Started" if self.services[s].start(request_build=request_build) else "Running"
+            message = "Started" if self.services[s].start() else "Running"
         return web.json_response(message)
 
     def start_server(self):
@@ -322,6 +327,7 @@ class Compose:
         try:
             if start_server:
                 self.start_server()
+
             self.services = {
                 name: AsyncProcess(
                     index,
