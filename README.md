@@ -171,4 +171,9 @@ python:
 
 - OS dependant behavior?
 
+## Similar tools
+
+It seems creating own compose-like tool is not that uncommon :)
+
+* https://github.com/F1bonacc1/process-compose
 
