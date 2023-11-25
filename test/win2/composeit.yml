@@ -30,3 +30,6 @@ services:
     args:
       - -t
       - 127.0.0.127
+  cat:
+    command: more
+    shell: true

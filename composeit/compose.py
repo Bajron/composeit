@@ -7,6 +7,7 @@ import termcolor
 import dotenv
 import aiohttp
 import io
+import sys
 import pathlib
 import hashlib
 import copy
@@ -17,7 +18,7 @@ from typing import List, Dict
 
 from .process import AsyncProcess
 from .graph import topological_sequence
-from .web_utils import ResponseAdapter
+from .web_utils import ResponseAdapter, WebSocketAdapter
 
 from socket import gethostname
 
@@ -254,6 +255,51 @@ class Compose:
 
         return stream_logs_response
 
+    async def attach(self, service):
+        server_up = await self.check_server_is_running()
+
+        if server_up:
+            await self.run_client_session(self.make_attach_session(service))
+        else:
+            self.logger.error("Server is not running")
+
+    def make_attach_session(self, service):
+        async def client_session(connector):
+            hostname = gethostname()
+            async with aiohttp.ClientSession(base_url=f"http://{hostname}", connector=connector) as session:
+                response = await session.get(f"/")
+                data = await response.json()
+                project = data["project_name"]
+
+                ws = await session.ws_connect(f"/{project}/{service}/attach")
+
+                async def print_ws_strings():
+                    while not ws.closed:
+                        try:
+                            line = await ws.receive_str()
+                            print(line, end="")
+                        except TypeError:
+                            self.logger.warning("Connection broken")
+                            # TODO: how to break the sys.stdin.readline?
+                            #       cannot really make it asyncio on Windows...
+                            #       https://stackoverflow.com/questions/31510190/aysncio-cannot-read-stdin-on-windows
+                            break
+
+                loop = asyncio.get_running_loop()
+                loop.create_task(print_ws_strings())
+
+                try:
+                    while not ws.closed:
+                        input_line = await loop.run_in_executor(None, sys.stdin.readline)
+                        if not ws.closed:
+                            await ws.send_str(input_line)
+                except asyncio.CancelledError:
+                    self.logger.debug("Attach cancelled")
+
+                return response
+
+        return client_session
+
     def get_call_json(self):
         return {
             "project_name": self.project_name,
@@ -304,6 +350,40 @@ class Compose:
         service = self._get_service(request)
         return web.json_response(self.get_service_json(service))
 
+    async def get_attach(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+
+        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
+        response = web.WebSocketResponse()
+
+        back_stream = WebSocketAdapter(response)
+        logs_to_response = logging.StreamHandler(back_stream)
+        self.services[service].attach_log_handler(logs_to_response)
+
+        def detach_logger(fut):
+            self.logger.debug(f"Detaching log sender from {service}")
+            self.services[service].detach_log_handler(logs_to_response)
+
+        await response.prepare(request)
+        response.task.add_done_callback(detach_logger)
+
+        try:
+            while not response.closed and not self.services[service].terminated:
+                try:
+                    line = await response.receive_str()
+                    self.services[service].process.stdin.write(line.encode())
+                except TypeError:
+                    break
+        finally:
+            self.logger.debug("Closing attach request")
+            try:
+                await response.close()
+            except ConnectionResetError:
+                self.logger.debug("Attach connection broken")
+
+        return response
+
     async def get_service_logs(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
@@ -351,7 +431,7 @@ class Compose:
         # TODO: definitely need to organize loggers better
         logs_to_response.setFormatter(logging.Formatter("%(name)s %(message)s"))
         # TODO: structure here and format in the client
-
+        # TODO: provide some recent logs buffer
         for s in services:
             self.services[s].attach_log_handler(logs_to_response)
 
@@ -414,6 +494,7 @@ class Compose:
                 web.post("/{project}/stop", self.post_stop_project),
                 web.get("/{project}/logs", self.get_services_logs),
                 web.get("/{project}/{service}", self.get_service),
+                web.get("/{project}/{service}/attach", self.get_attach),
                 web.get("/{project}/{service}/logs", self.get_service_logs),
                 web.post("/{project}/{service}/stop", self.post_stop_service),
                 web.post("/{project}/{service}/start", self.post_start_service),

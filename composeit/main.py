@@ -145,6 +145,8 @@ def main():
             asyncio.run(compose.stop(services))
         elif options.command == "logs":
             asyncio.run(compose.logs(services))
+        elif options.command == "attach":
+            asyncio.run(compose.attach(services[0]))
         elif options.command == "config":
             pprint.pprint(compose.service_config)
         else:
