@@ -17,6 +17,7 @@ from typing import List, Dict
 
 from .process import AsyncProcess
 from .graph import topological_sequence
+from .web_utils import ResponseAdapter
 
 from socket import gethostname
 
@@ -220,6 +221,39 @@ class Compose:
 
         return run_client_commands
 
+    async def logs(self, services=None):
+        server_up = await self.check_server_is_running()
+
+        if server_up:
+            await self.run_client_session(self.make_logs_session(services))
+        else:
+            self.logger.error("Server is not running")
+
+    def make_logs_session(self, services=None):
+        async def stream_logs_response(connector):
+            hostname = gethostname()
+            async with aiohttp.ClientSession(base_url=f"http://{hostname}", connector=connector) as session:
+                response = await session.get(f"/")
+                data = await response.json()
+                project = data["project_name"]
+
+                if services is not None and len(services) == 1:
+                    service = services[0]
+                    response = await session.get(f"/{project}/{service}/logs")
+                else:
+                    params = [("service", s) for s in services] if services else None
+                    response = await session.get(f"/{project}/logs", params=params)
+
+                try:
+                    async for line in response.content:
+                        print(line.decode(), end="")
+                except asyncio.CancelledError:
+                    self.logger.debug("Request cancelled")
+
+                return response
+
+        return stream_logs_response
+
     def get_call_json(self):
         return {
             "project_name": self.project_name,
@@ -270,6 +304,78 @@ class Compose:
         service = self._get_service(request)
         return web.json_response(self.get_service_json(service))
 
+    async def get_service_logs(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
+        response = web.StreamResponse()
+        response.enable_chunked_encoding()
+
+        process = self.services[service]
+        back_stream = ResponseAdapter(response)
+        logs_to_response = logging.StreamHandler(back_stream)
+        process.attach_log_handler(logs_to_response)
+
+        def detach_logger(fut):
+            self.logger.debug("Detaching log sender from service")
+            process.detach_log_handler(logs_to_response)
+
+        await response.prepare(request)
+        response.task.add_done_callback(detach_logger)
+
+        try:
+            # TODO: cleaner solution? websocket here?
+            while not await back_stream.is_broken() and not process.terminated:
+                await asyncio.sleep(1)
+        finally:
+            self.logger.debug("Closing logs request")
+            try:
+                await response.write_eof()
+            except ConnectionResetError:
+                self.logger.debug("Log connection broken")
+        return response
+
+    async def get_services_logs(self, request: web.Request):
+        self._get_project(request)
+
+        services = request.query.getall("service", None)
+        if services is None:
+            services = list(self.services.keys())
+
+        response = web.StreamResponse()
+        response.enable_chunked_encoding()
+
+        back_stream = ResponseAdapter(response)
+        logs_to_response = logging.StreamHandler(back_stream)
+        # TODO: colors in formatter via name? otherwise separate stream handlers and formatters :/
+        # TODO: definitely need to organize loggers better
+        logs_to_response.setFormatter(logging.Formatter("%(name)s %(message)s"))
+        # TODO: structure here and format in the client
+
+        for s in services:
+            self.services[s].attach_log_handler(logs_to_response)
+
+        def detach_loggers(fut):
+            for s in services:
+                self.logger.debug(f"Detaching log sender from {s}")
+                self.services[s].detach_log_handler(logs_to_response)
+
+        await response.prepare(request)
+        response.task.add_done_callback(detach_loggers)
+
+        try:
+            # TODO: cleaner solution? websocket here?
+            while not await back_stream.is_broken() and not all([self.services[s].terminated for s in services]):
+                await asyncio.sleep(1)
+        finally:
+            self.logger.debug("Closing log request")
+            try:
+                await response.write_eof()
+            except ConnectionResetError:
+                self.logger.debug("Log connection broken")
+
+        return response
+
     async def post_stop_service(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
@@ -306,7 +412,9 @@ class Compose:
                 web.get("/", self.get_call),
                 web.get("/{project}", self.get_project),
                 web.post("/{project}/stop", self.post_stop_project),
+                web.get("/{project}/logs", self.get_services_logs),
                 web.get("/{project}/{service}", self.get_service),
+                web.get("/{project}/{service}/logs", self.get_service_logs),
                 web.post("/{project}/{service}/stop", self.post_stop_service),
                 web.post("/{project}/{service}/start", self.post_start_service),
             ]
@@ -393,7 +501,7 @@ class Compose:
                 return await session_function(connector)
         else:
             async with aiohttp.UnixConnector(path=self.communication_pipe) as connector:
-                return await session_function(connector, url)
+                return await session_function(connector)
 
     async def check_server_is_running(self):
         try:
@@ -475,6 +583,7 @@ async def run_server(app: Application, path: str, delete_pipe=True):
         while True:
             await asyncio.sleep(delay)
     finally:
+        logger.debug("Cleanup after run_server")
         await runner.cleanup()
         # Seems to be cleaned on Windows
         if delete_pipe and os.name != "nt":

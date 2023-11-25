@@ -64,8 +64,8 @@ class AsyncProcess:
 
         self.color = color
 
-        self.lout = logging.getLogger(f"{self.name}: ")
-        self.lerr = logging.getLogger(f"{self.name}> ")
+        self.lout = logging.getLogger(f"{self.name}:")
+        self.lerr = logging.getLogger(f"{self.name}>")
         self.log = logging.getLogger(f"{self.name}")
 
         logHandler = logging.StreamHandler(stream=sys.stderr)
@@ -74,12 +74,8 @@ class AsyncProcess:
         self.log.setLevel(logging.INFO)
         self.log.propagate = False
 
-        color_wrap = make_colored(self.color) if self.color is not None else not_colored
-
-        formatter = logging.Formatter(color_wrap("%(name)s%(message)s"))
         streamHandler = logging.StreamHandler(stream=sys.stdout)
-        streamHandler.setFormatter(formatter)
-        streamHandler.terminator = ""
+        streamHandler.setFormatter(self.get_output_formatter())
         self.lout.setLevel(logging.INFO)
         self.lout.addHandler(streamHandler)
         self.lout.propagate = False
@@ -94,11 +90,27 @@ class AsyncProcess:
         self.stopped = True
         self.exception = None
 
+    def get_output_formatter(self):
+        color_wrap = make_colored(self.color) if self.color is not None else not_colored
+        return logging.Formatter(color_wrap("%(name)s %(message)s"))
+
     def request_clean(self):
         self.execute_clean = True
 
     def request_build(self):
         self.execute_build = True
+
+    def attach_log_handler(self, handler: logging.StreamHandler):
+        self.log.debug(f"Logger attached {handler}")
+        self.log.addHandler(handler)
+        self.lout.addHandler(handler)
+        self.lerr.addHandler(handler)
+
+    def detach_log_handler(self, handler: logging.StreamHandler):
+        self.log.debug(f"Logger detached {handler}")
+        self.log.removeHandler(handler)
+        self.lout.removeHandler(handler)
+        self.lerr.removeHandler(handler)
 
     async def _make_process(self):
         service_config = self.service_config
@@ -194,7 +206,7 @@ class AsyncProcess:
             return
         async for l in process.stderr:
             try:
-                self.lerr.info(l.decode(errors="ignore"))
+                self.lerr.info(l.decode(errors="ignore").rstrip("\r\n"))
             except UnicodeDecodeError as ex:
                 self.log.warning(f"Cannot decode stderr line: {ex}")
 
@@ -203,7 +215,7 @@ class AsyncProcess:
             return
         async for l in process.stdout:
             try:
-                self.lout.info(l.decode(errors="ignore"))
+                self.lout.info(l.decode(errors="ignore").rstrip("\r\n"))
             except UnicodeDecodeError as ex:
                 self.log.warning(f"Cannot decode stdout line: {ex}")
 

@@ -61,7 +61,7 @@ I also is quite a serious package...
 
 There are similar things like `pypyr` or `prefect`,
 but they kind of do a different thing.
-I wanted to organiza a set of long running processes, not a pipeline.
+I wanted to organize a set of long running processes, not a pipeline.
 
 Later I also found `honcho`, seems ok for the task.
 

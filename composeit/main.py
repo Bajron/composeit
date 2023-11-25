@@ -56,6 +56,12 @@ def main():
     parser_stop = subparsers.add_parser("stop", help="Close the services")
     parser_stop.add_argument("service", nargs="*", help="Specific service to close")
 
+    parser_logs = subparsers.add_parser("logs", help="Show logs from the services")
+    parser_logs.add_argument("service", nargs="*", help="Specific services to show logs from")
+
+    parser_attach = subparsers.add_parser("attach", help="Attach to a service")
+    parser_attach.add_argument("service", nargs=1, help="Specific service to attach to")
+
     parser_config = subparsers.add_parser("config", help="Show services config")
 
     options = parser.parse_args()
@@ -137,6 +143,8 @@ def main():
             asyncio.run(compose.down(services))
         elif options.command == "stop":
             asyncio.run(compose.stop(services))
+        elif options.command == "logs":
+            asyncio.run(compose.logs(services))
         elif options.command == "config":
             pprint.pprint(compose.service_config)
         else:
