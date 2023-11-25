@@ -56,9 +56,6 @@ def main():
     parser_stop = subparsers.add_parser("stop", help="Close the services")
     parser_stop.add_argument("service", nargs="*", help="Specific service to close")
 
-    parser_build = subparsers.add_parser("build", help="Builds services")
-    parser_build.add_argument("service", nargs="*", help="Specific service to build")
-
     parser_config = subparsers.add_parser("config", help="Show services config")
 
     options = parser.parse_args()
