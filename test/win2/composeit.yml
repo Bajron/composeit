@@ -1,4 +1,5 @@
 services:
+  # Testing restarts and build/clean
   echo_service:
     build:
       shell_sequence:
@@ -9,21 +10,23 @@ services:
         - del prep.log
         - dir
     shell: true
-    command: "more prep.log && ping wp.pl"
+    command: "more prep.log && ping 127.0.0.1"
     restart: always
     restart_policy:
       window: 1
-  # This one is problematic to kill...
+      max_attempts: 5
+  # Problematic to terminate
   echo_service2:
     command: ping -t %TARGET%
     shell: true
     environment:
-      - TARGET=onet.pl
+      - TARGET=127.0.0.2
+  # Problematic to terminate
   echo_service3:
-    command: ping -t rmf.pl
+    command: ping -t 127.0.0.3
     shell: true
   ping:
     command: ping
     args:
       - -t
-      - google.pl
+      - 127.0.0.127

@@ -15,19 +15,19 @@ services:
   ping_service1:
     command: ping
     args:
-      - "onet.pl"
+      - "127.0.0.1"
     working_dir: "C:\\"
 
   ping_service2:
     inherit_environment: false
-    command: [ping, wp.pl]
+    command: [ping, 127.0.0.2]
 
   ping_service3:
-    command: ping -c 4 google.pl
+    command: ping -c 4 127.0.0.3
     shell: true
     restart: on-failure
 
   ping_service4:
-    command: ping -c 4 google.com
+    command: ping -c 4 127.0.0.4
     shell: true
     restart: always

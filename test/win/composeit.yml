@@ -17,21 +17,21 @@ services:
     command: ping
     args:
       - "-t"
-      - "onet.pl"
+      - "127.0.0.1"
     working_dir: "C:\\"
 
   ping_service2:
     inherit_environment: false
-    command: [ping, -t, wp.pl]
+    command: [ping, -t, 127.0.0.2]
 
   ping_service3:
-    command: ping google.pl
+    command: ping 127.0.0.3
     shell: true
     restart: on-failure
     depends_on: ping_service2
 
   ping_service4:
-    command: ping -n ${MAX_REPEAT:-10} google.com
+    command: ping -n ${MAX_REPEAT:-10} 127.0.0.4
     shell: true
     restart: always
     depends_on:
@@ -39,6 +39,6 @@ services:
 
   ping_no_log:
     inherit_environment: false
-    command: [ping, -t, wp.pl]
+    command: [ping, -t, 127.0.0.5]
     logging:
       driver: none
