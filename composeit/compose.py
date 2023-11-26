@@ -4,9 +4,7 @@ import signal
 import os
 import logging
 import termcolor
-import dotenv
 import aiohttp
-import io
 import sys
 import pathlib
 import hashlib
@@ -19,31 +17,11 @@ from typing import List, Dict
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
+from .utils import resolve
 
 from socket import gethostname
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
-
-
-def resolve_string(s: str):
-    # NOTE: This is not fully compatible with https://docs.docker.com/compose/environment-variables/env-file/
-    #       Required and alternative values are not handled. Single quote also a little different.
-    #       We are working on that though B]
-    #       https://github.com/Bajron/python-dotenv
-    return dotenv.dotenv_values(stream=io.StringIO(f'X="{s}"'))["X"]
-    return dotenv.main.resolve_variables({"H": f"{s}"})["H"]
-    # TODO: single quotes
-    # TODO: new interface after change
-
-
-def resolve(value):
-    if isinstance(value, list):
-        return [resolve(e) for e in value]
-    if isinstance(value, dict):
-        return {k: resolve(v) for k, v in value.items()}
-    if isinstance(value, str):
-        return resolve_string(value)
-    return value
 
 
 class ColorAssigner:
