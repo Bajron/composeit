@@ -62,6 +62,10 @@ def main():
     parser_attach = subparsers.add_parser("attach", help="Attach to a service")
     parser_attach.add_argument("service", nargs=1, help="Specific service to attach to")
 
+    parser_ps = subparsers.add_parser("ps", help="Show services state")
+
+    parser_top = subparsers.add_parser("top", help="Show processes")
+
     parser_config = subparsers.add_parser("config", help="Show services config")
 
     options = parser.parse_args()
@@ -149,6 +153,10 @@ def main():
             asyncio.run(compose.attach(services[0]))
         elif options.command == "config":
             pprint.pprint(compose.service_config)
+        elif options.command == "ps":
+            asyncio.run(compose.ps())
+        elif options.command == "top":
+            asyncio.run(compose.top())
         else:
             print(f"Unhandled option {options.command}")
     else:

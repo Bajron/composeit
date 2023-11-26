@@ -9,6 +9,35 @@ def duration_to_seconds(duration):
     raise Exception(f"Duration {duration} not handled. Only numbers supported for now")
 
 
+def duration_text(seconds):
+    D = 3600 * 24
+    H = 3600
+    M = 60
+
+    s = round(seconds)
+    d = s // D
+    s -= d * D
+    h = s // H
+    s -= h * H
+    m = s // M
+    s -= m * M
+
+    r = []
+    if d > 0:
+        r.append(f"{d}d")
+    if h > 0:
+        r.append(f"{h}h")
+    if m > 0:
+        r.append(f"{m}m")
+    if s > 0:
+        r.append(f"{s}s")
+
+    if len(r) == 0:
+        return f"{round(seconds, 2)}s"
+    else:
+        return " ".join(r)
+
+
 def resolve_string(s: str):
     # NOTE: This is not fully compatible with https://docs.docker.com/compose/environment-variables/env-file/
     #       Required and alternative values are not handled. Single quote also a little different.

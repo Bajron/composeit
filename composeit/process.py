@@ -46,9 +46,13 @@ class AsyncProcess:
         self.execute_build = execute_build
         self.execute_clean = execute_clean
 
+        self.build_time = None
+
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
         self.process: asyncio.subprocess.Process = None
+        self.start_time = None
+        self.stop_time = None
         self.watch_coro = None
         self.sleep_task = None
 
@@ -86,6 +90,7 @@ class AsyncProcess:
         self.popen_kw = {}
 
         self.rc = None
+        self.restarting = False
         self.terminated = False
         self.stopped = True
         self.exception = None
@@ -99,6 +104,16 @@ class AsyncProcess:
 
     def request_build(self):
         self.execute_build = True
+
+    def get_state(self):
+        if self.terminated:
+            return "terminated"
+        elif self.restarting:
+            return "restarting"
+        elif self.stopped:
+            return "stopped"
+        else:
+            return "started"
 
     def attach_log_handler(self, handler: logging.StreamHandler):
         self.log.debug(f"Logger attached {handler}")
@@ -141,7 +156,11 @@ class AsyncProcess:
                 env_definition = [env_definition]
             if isinstance(env_definition, list):
                 entries = [dotenv.dotenv_values(stream=io.StringIO(e)) for e in env_definition]
-                to_add = {k: v if v is not None else os.environ.get(k, "") for d in entries for k, v in d.items()}
+                to_add = {
+                    k: v if v is not None else os.environ.get(k, "")
+                    for d in entries
+                    for k, v in d.items()
+                }
             if isinstance(env_definition, dict):
                 to_add = env_definition
             env.update(to_add)
@@ -191,8 +210,13 @@ class AsyncProcess:
             )
             command.extend(service_config.get("args", []))
             process = await asyncio.create_subprocess_exec(
-                *command, stdin=asyncio.subprocess.PIPE, stderr=stream_mode, stdout=stream_mode, **popen_kw
+                *command,
+                stdin=asyncio.subprocess.PIPE,
+                stderr=stream_mode,
+                stdout=stream_mode,
+                **popen_kw,
             )
+        self.start_time = time.time()
         return process
 
     def _output(self, sep: str, message: str):
@@ -221,8 +245,11 @@ class AsyncProcess:
 
     async def wait_for_code(self):
         self.rc = await self.process.wait()
+        self.stop_time = time.time()
 
     async def _resolve_restart(self):
+        self.restarting = True
+
         max_attempts = self.restart_policy_config["max_attempts"]
         attempt = 1
         self.log.debug(
@@ -287,10 +314,13 @@ class AsyncProcess:
 
                 while process_started:
                     await self.watch_coro
-                    self.log.info(f"{self.service_config['command']} finished with error code {self.rc}")
+                    self.log.info(
+                        f"{self.service_config['command']} finished with error code {self.rc}"
+                    )
 
                     self.log.info(f"Restart policy is {self.restart_policy}")
                     process_started = await self._resolve_restart()
+                    self.restarting = False
             except FileNotFoundError as ex:
                 self.log.error(f"Error running command {self.name} {ex}")
                 self.exception = ex
@@ -328,6 +358,8 @@ class AsyncProcess:
                     if rc != 0:
                         self.log.warning(f"Build sequence interrupted with error")
                         break
+                if rc == 0:
+                    self.build_time = time.time()
                 return rc
         return 0
 
@@ -390,6 +422,8 @@ class AsyncProcess:
     async def _start_process(self):
         self.rc = None
         self.process = None
+        self.start_time = None
+        self.stop_time = None
         self.process_initialization = self._make_process()
 
     def _cancel_sleep(self):

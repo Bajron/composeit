@@ -9,6 +9,7 @@ import sys
 import pathlib
 import hashlib
 import copy
+import time
 from aiohttp import web, ClientConnectorError
 from json.decoder import JSONDecodeError
 
@@ -17,7 +18,7 @@ from typing import List, Dict
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
-from .utils import resolve
+from .utils import resolve, duration_text
 
 from socket import gethostname
 
@@ -35,7 +36,9 @@ class ColorAssigner:
 
 
 class Compose:
-    def __init__(self, project_name, working_directory, service_files, verbose=False, use_color=True) -> None:
+    def __init__(
+        self, project_name, working_directory, service_files, verbose=False, use_color=True
+    ) -> None:
         self.project_name = project_name
         self.working_directory = working_directory
 
@@ -68,7 +71,10 @@ class Compose:
         return self.color_assigner.next() if self.use_colors else None
 
     def _parse_service_config(self):
-        parsed_files = [yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.service_files]
+        parsed_files = [
+            yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.service_files
+        ]
+        # TODO validate format
         parsed_data = merge_configs(parsed_files)
 
         self.service_config = resolve(parsed_data)
@@ -98,7 +104,9 @@ class Compose:
         return topological_sequence(services, self.depending)
 
     async def build(self, services=None):
-        await self.watch_services(start_server=False, start_services=services, execute=False, execute_build=True)
+        await self.watch_services(
+            start_server=False, start_services=services, execute=False, execute_build=True
+        )
 
     async def up(self, services=None):
         await self.start(services=services, execute_build=True)
@@ -134,7 +142,8 @@ class Compose:
 
                 for service in to_request:
                     response = await session.post(
-                        f"http://{hostname}/{project}/{service}/start", json={"request_build": request_build}
+                        f"http://{hostname}/{project}/{service}/start",
+                        json={"request_build": request_build},
                     )
                     if response.status == 200:
                         print(service, await response.json())
@@ -163,7 +172,9 @@ class Compose:
             self.logger.error("Server is not running")
 
     def get_always_restart_services(self):
-        return [name for name, service in self.services.items() if service.restart_policy == "always"]
+        return [
+            name for name, service in self.services.items() if service.restart_policy == "always"
+        ]
 
     def make_stop_session(self, services=None, request_clean=False):
         async def run_client_commands(connector):
@@ -185,7 +196,8 @@ class Compose:
 
                         self.logger.debug(f"Stopping {hostname}/{project}/{service}")
                         response = await session.post(
-                            f"http://{hostname}/{project}/{service}/stop", json={"request_clean": request_clean}
+                            f"http://{hostname}/{project}/{service}/stop",
+                            json={"request_clean": request_clean},
                         )
                         if response.status == 200:
                             print(service, await response.json())
@@ -211,7 +223,9 @@ class Compose:
     def make_logs_session(self, services=None):
         async def stream_logs_response(connector):
             hostname = gethostname()
-            async with aiohttp.ClientSession(base_url=f"http://{hostname}", connector=connector) as session:
+            async with aiohttp.ClientSession(
+                base_url=f"http://{hostname}", connector=connector
+            ) as session:
                 response = await session.get(f"/")
                 data = await response.json()
                 project = data["project_name"]
@@ -244,7 +258,9 @@ class Compose:
     def make_attach_session(self, service):
         async def client_session(connector):
             hostname = gethostname()
-            async with aiohttp.ClientSession(base_url=f"http://{hostname}", connector=connector) as session:
+            async with aiohttp.ClientSession(
+                base_url=f"http://{hostname}", connector=connector
+            ) as session:
                 response = await session.get(f"/")
                 data = await response.json()
                 project = data["project_name"]
@@ -287,6 +303,91 @@ class Compose:
                 return response
 
         return client_session
+
+    async def ps(self):
+        server_up = await self.check_server_is_running()
+
+        if server_up:
+            await self.run_client_session(self.make_ps_session())
+        else:
+            self.logger.error("Server is not running")
+
+    def make_ps_session(self):
+        async def client_session(connector):
+            hostname = gethostname()
+            async with aiohttp.ClientSession(
+                base_url=f"http://{hostname}", connector=connector
+            ) as session:
+                async with session.get(f"/") as response:
+                    compose_data = await response.json()
+                    project = compose_data["project_name"]
+
+                async with session.get(f"/{project}") as response:
+                    project_data = await response.json()
+                    services = project_data["services"]
+
+                service_data = []
+                for s in services:
+                    async with session.get(f"/{project}/{s}") as response:
+                        service_data.append(await response.json())
+
+                service_data.sort(key=lambda x: x["sequence"])
+                now = time.time()
+
+                header = [
+                    ("name", "NAME", 20),
+                    ("command", "COMMAND", 30),
+                    ("created", "CREATED", 12),
+                    ("status", "STATUS", 18),
+                ]
+                fmt = ""
+                for n, _, w in header:
+                    fmt += f"{{{n}:{w}}} "
+                self.logger.debug(f"Format is '{fmt}'")
+
+                info_rows = []
+                for s in service_data:
+                    self.logger.debug(f"Service {s}")
+
+                    row = {}
+                    row["name"] = s["name"]
+                    # TODO: need processing from the process class
+                    cmd = f'{s["config"]["command"]}'
+                    if len(cmd) > 30:
+                        cmd = cmd[:27] + "..."
+                    row["command"] = cmd
+
+                    since_build = (now - s["build_time"]) if s["build_time"] else None
+                    row["created"] = (
+                        f"{duration_text(since_build)} ago" if since_build is not None else "--"
+                    )
+
+                    state = s["state"]
+                    if state == "started":
+                        since_start = (now - s["start_time"]) if s["start_time"] else None
+                        row["status"] = f"Up {duration_text(since_start)}"
+                    elif state == "stopped":
+                        since_stop = (now - s["stop_time"]) if s["stop_time"] else None
+                        rc = s["return_code"]
+                        row["status"] = f"exited ({rc}) {duration_text(since_stop)} ago"
+                    elif state == "terminated":
+                        since_stop = (now - s["stop_time"]) if s["stop_time"] else None
+                        row["status"] = f"terminated {duration_text(since_stop)} ago"
+                    else:
+                        row["status"] = state
+
+                    info_rows.append(row)
+
+                print(f"Project: {project}, in {compose_data['working_directory']}")
+                print(fmt.format(**{k: v for k, v, _ in header}))
+                for row in info_rows:
+                    print(fmt.format(**row))
+
+        return client_session
+
+    async def top(self):
+        print("TODO: not implemented")
+        pass
 
     def get_call_json(self):
         return {
@@ -331,7 +432,18 @@ class Compose:
 
     def get_service_json(self, service_name):
         s = self.services[service_name]
-        return {"name": s.name, "pid": s.process.pid, "pobject": s.popen_kw}
+        return {
+            "sequence": s.sequence,
+            "name": s.name,
+            "state": s.get_state(),
+            "build_time": s.build_time,
+            "start_time": s.start_time,
+            "stop_time": s.stop_time,
+            "pid": s.process.pid,
+            "return_code": s.rc,
+            "pobject": s.popen_kw,
+            "config": s.service_config,
+        }
 
     async def get_service(self, request: web.Request):
         self._get_project(request)
@@ -433,7 +545,9 @@ class Compose:
 
         try:
             # TODO: cleaner solution? websocket here?
-            while not await back_stream.is_broken() and not all([self.services[s].terminated for s in services]):
+            while not await back_stream.is_broken() and not all(
+                [self.services[s].terminated for s in services]
+            ):
                 await asyncio.sleep(1)
         finally:
             self.logger.debug("Closing log request")
@@ -499,7 +613,12 @@ class Compose:
             self.services[service].terminate()
 
     async def watch_services(
-        self, start_services=None, start_server=True, execute=True, execute_build=False, execute_clean=False
+        self,
+        start_services=None,
+        start_server=True,
+        execute=True,
+        execute_build=False,
+        execute_clean=False,
     ):
         try:
             if start_server:
@@ -515,7 +634,9 @@ class Compose:
                     execute_build=execute_build,
                     execute_clean=execute_clean,
                 )
-                for (index, (name, service_config)) in enumerate(self.service_config["services"].items())
+                for (index, (name, service_config)) in enumerate(
+                    self.service_config["services"].items()
+                )
             }
 
             if self.verbose:
@@ -534,7 +655,9 @@ class Compose:
             else:
                 additional = self.get_always_restart_services()
                 if len(additional) > 0:
-                    self.logger.debug(f"Services with restart policy 'always' are started as well: {additional}")
+                    self.logger.debug(
+                        f"Services with restart policy 'always' are started as well: {additional}"
+                    )
                 start_services += additional
 
             for name in self.get_start_sequence(start_services):
