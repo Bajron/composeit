@@ -450,13 +450,13 @@ class AsyncProcess:
         # Tries to fix the leftover processes on Windows
         # Could be different with process group on Linux
 
-        for i in range(10):
+        for _ in range(10):
             running = 0
             for child in children:
                 if child.is_running():
                     running += 1
                     time.sleep(0)
-            if running == len(children):
+            if running == 0:
                 break
 
         # TODO wait for a while until children are running? Then terminate
