@@ -251,13 +251,23 @@ class Compose:
 
                 ws = await session.ws_connect(f"/{project}/{service}/attach")
 
+                exit_requested = False
+
+                def signal_handler(signal, frame):
+                    nonlocal exit_requested
+                    exit_requested = True
+                    asyncio.get_event_loop().create_task(ws.close())
+
+                signal.signal(signal.SIGINT, signal_handler)
+
                 async def print_ws_strings():
                     while not ws.closed:
                         try:
                             line = await ws.receive_str()
                             print(line, end="")
                         except TypeError:
-                            self.logger.warning("Connection broken")
+                            if not exit_requested:
+                                self.logger.warning("Connection broken")
                             # TODO: how to break the sys.stdin.readline?
                             #       cannot really make it asyncio on Windows...
                             #       https://stackoverflow.com/questions/31510190/aysncio-cannot-read-stdin-on-windows
@@ -586,7 +596,8 @@ class Compose:
                 response = await session.request(method, path)
                 self.logger.debug(f"HTTP response: {response}")
                 if response.status == 200:
-                    print(await response.json())
+                    data = await response.json()
+                    self.logger.debug(f"JSON: {data}")
                 return response
 
         return run_client_commands
