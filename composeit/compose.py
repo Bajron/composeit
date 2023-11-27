@@ -443,6 +443,7 @@ class Compose:
                 if s["return_code"] is not None:
                     continue
                 try:
+                    # TODO move this to the server for remote scenario
                     p = psutil.Process(pid)
                     info_rows.append(make_row(p))
                     for ch in p.children(recursive=True):
