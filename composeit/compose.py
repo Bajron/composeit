@@ -10,6 +10,7 @@ import pathlib
 import hashlib
 import copy
 import time
+import psutil
 from aiohttp import web, ClientConnectorError
 from json.decoder import JSONDecodeError
 
@@ -18,7 +19,7 @@ from typing import List, Dict
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
-from .utils import resolve, duration_text
+from .utils import resolve, duration_text, cumulative_time_text, date_time_text
 
 from socket import gethostname
 
@@ -308,86 +309,152 @@ class Compose:
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_ps_session())
+            await self.execute_client_session(self.make_ps_session())
         else:
             self.logger.error("Server is not running")
 
     def make_ps_session(self):
-        async def client_session(connector):
-            hostname = gethostname()
-            async with aiohttp.ClientSession(
-                base_url=f"http://{hostname}", connector=connector
-            ) as session:
-                async with session.get(f"/") as response:
-                    compose_data = await response.json()
-                    project = compose_data["project_name"]
+        async def client_session(session):
+            async with session.get(f"/") as response:
+                compose_data = await response.json()
+                project = compose_data["project_name"]
 
-                async with session.get(f"/{project}") as response:
-                    project_data = await response.json()
-                    services = project_data["services"]
+            async with session.get(f"/{project}") as response:
+                project_data = await response.json()
+                services = project_data["services"]
 
-                service_data = []
-                for s in services:
-                    async with session.get(f"/{project}/{s}") as response:
-                        service_data.append(await response.json())
+            service_data = []
+            for s in services:
+                async with session.get(f"/{project}/{s}") as response:
+                    service_data.append(await response.json())
 
-                service_data.sort(key=lambda x: x["sequence"])
-                now = time.time()
+            service_data.sort(key=lambda x: x["sequence"])
+            now = time.time()
 
-                header = [
-                    ("name", "NAME", 20),
-                    ("command", "COMMAND", 30),
-                    ("created", "CREATED", 12),
-                    ("status", "STATUS", 18),
-                ]
-                fmt = ""
-                for n, _, w in header:
-                    fmt += f"{{{n}:{w}}} "
-                self.logger.debug(f"Format is '{fmt}'")
+            header = [
+                ("name", "NAME", 20),
+                ("command", "COMMAND", 30),
+                ("created", "CREATED", 12),
+                ("status", "STATUS", 18),
+            ]
+            fmt = ""
+            for n, _, w in header:
+                fmt += f"{{{n}:{w}}} "
+            self.logger.debug(f"Format is '{fmt}'")
 
-                info_rows = []
-                for s in service_data:
-                    self.logger.debug(f"Service {s}")
+            info_rows = []
+            for s in service_data:
+                self.logger.debug(f"Service {s}")
 
-                    row = {}
-                    row["name"] = s["name"]
-                    # TODO: need processing from the process class
-                    cmd = f'{s["config"]["command"]}'
-                    if len(cmd) > 30:
-                        cmd = cmd[:27] + "..."
-                    row["command"] = cmd
+                row = {}
+                row["name"] = s["name"]
+                # TODO: need processing from the process class
+                cmd = f'{s["config"]["command"]}'
+                if len(cmd) > 30:
+                    cmd = cmd[:27] + "..."
+                row["command"] = cmd
 
-                    since_build = (now - s["build_time"]) if s["build_time"] else None
-                    row["created"] = (
-                        f"{duration_text(since_build)} ago" if since_build is not None else "--"
-                    )
+                since_build = (now - s["build_time"]) if s["build_time"] else None
+                row["created"] = (
+                    f"{duration_text(since_build)} ago" if since_build is not None else "--"
+                )
 
-                    state = s["state"]
-                    if state == "started":
-                        since_start = (now - s["start_time"]) if s["start_time"] else None
-                        row["status"] = f"Up {duration_text(since_start)}"
-                    elif state == "stopped":
-                        since_stop = (now - s["stop_time"]) if s["stop_time"] else None
-                        rc = s["return_code"]
-                        row["status"] = f"exited ({rc}) {duration_text(since_stop)} ago"
-                    elif state == "terminated":
-                        since_stop = (now - s["stop_time"]) if s["stop_time"] else None
-                        row["status"] = f"terminated {duration_text(since_stop)} ago"
-                    else:
-                        row["status"] = state
+                state = s["state"]
+                if state == "started":
+                    since_start = (now - s["start_time"]) if s["start_time"] else None
+                    row["status"] = f"Up {duration_text(since_start)}"
+                elif state == "stopped":
+                    since_stop = (now - s["stop_time"]) if s["stop_time"] else None
+                    rc = s["return_code"]
+                    row["status"] = f"exited ({rc}) {duration_text(since_stop)} ago"
+                elif state == "terminated":
+                    since_stop = (now - s["stop_time"]) if s["stop_time"] else None
+                    row["status"] = f"terminated {duration_text(since_stop)} ago"
+                else:
+                    row["status"] = state
 
-                    info_rows.append(row)
+                info_rows.append(row)
 
-                print(f"Project: {project}, in {compose_data['working_directory']}")
-                print(fmt.format(**{k: v for k, v, _ in header}))
-                for row in info_rows:
-                    print(fmt.format(**row))
+            print(f"Project: {project}, in {compose_data['working_directory']}")
+            print(fmt.format(**{k: v for k, v, _ in header}))
+            for row in info_rows:
+                print(fmt.format(**row))
 
         return client_session
 
     async def top(self):
-        print("TODO: not implemented")
-        pass
+        server_up = await self.check_server_is_running()
+
+        if server_up:
+            await self.execute_client_session(self.make_top_session())
+        else:
+            self.logger.error("Server is not running")
+
+    def make_top_session(self):
+        async def client_session(session):
+            async with session.get(f"/") as response:
+                compose_data = await response.json()
+                project = compose_data["project_name"]
+
+            async with session.get(f"/{project}") as response:
+                project_data = await response.json()
+                services = project_data["services"]
+
+            service_data = []
+            for s in services:
+                async with session.get(f"/{project}/{s}") as response:
+                    service_data.append(await response.json())
+
+            service_data.sort(key=lambda x: x["sequence"])
+            now = time.time()
+
+            header = [
+                ("uid", "UID", 16),
+                ("pid", "PID", 6),
+                ("ppid", "PPID", 6),
+                ("c", "C", 5),
+                ("stime", "STIME", 10),
+                ("tty", "TTY", 6),
+                ("time", "TIME", 10),
+                ("cmd", "CMD", 20),
+            ]
+            fmt = ""
+            for n, _, w in header:
+                fmt += f"{{{n}:{w}}} "
+            self.logger.debug(f"Format is '{fmt}'")
+
+            def make_row(p: psutil.Process):
+                row = {}
+                row["uid"] = p.username()
+                row["pid"] = p.pid
+                row["ppid"] = p.ppid()
+                row["c"] = p.cpu_percent()
+                row["stime"] = date_time_text(p.create_time())
+                row["tty"] = p.terminal() if hasattr(p, "terminal") else ""
+                row["time"] = cumulative_time_text(p.cpu_times().user)
+                row["cmd"] = " ".join(p.cmdline())
+                return row
+
+            info_rows = []
+            for s in service_data:
+                self.logger.debug(f"Service {s}")
+                pid = s["pid"]
+                if s["return_code"] is not None:
+                    continue
+                try:
+                    p = psutil.Process(pid)
+                    info_rows.append(make_row(p))
+                    for ch in p.children(recursive=True):
+                        info_rows.append(make_row(ch))
+                except psutil.NoSuchProcess:
+                    pass
+
+            print(f"Project: {project}, in {compose_data['working_directory']}")
+            print(fmt.format(**{k: v for k, v, _ in header}))
+            for row in info_rows:
+                print(fmt.format(**row))
+
+        return client_session
 
     def get_call_json(self):
         return {
@@ -679,26 +746,36 @@ class Compose:
 
     async def run_client_session(self, session_function):
         try:
-            return await self.execute_client_session(session_function)
+            return await self.execute_with_connector(session_function)
         except ClientConnectorError as ex:
             self.logger.error(f" ** Connection error for {self.communication_pipe}: {ex}")
         except FileNotFoundError as ex:
             self.logger.error(f" ** Name error for {self.communication_pipe}: {ex}")
         return None
 
-    async def execute_client_session(self, session_function):
+    async def execute_with_connector(self, connector_function):
         self.logger.debug(f"Connect: {self.communication_pipe}")
         if os.name == "nt":
             async with aiohttp.NamedPipeConnector(path=self.communication_pipe) as connector:
-                return await session_function(connector)
+                return await connector_function(connector)
         else:
             async with aiohttp.UnixConnector(path=self.communication_pipe) as connector:
-                return await session_function(connector)
+                return await connector_function(connector)
+
+    async def execute_client_session(self, session_function):
+        async def with_connector(connector):
+            hostname = gethostname()
+            async with aiohttp.ClientSession(
+                base_url=f"http://{hostname}", connector=connector
+            ) as session:
+                return await session_function(session)
+
+        return await self.run_client_session(with_connector)
 
     async def check_server_is_running(self):
         try:
             command = self.make_single_url_request("/", method="GET")
-            response = await self.execute_client_session(command)
+            response = await self.execute_with_connector(command)
             data = await response.json()
             if data["project_name"] != self.project_name:
                 raise Exception(

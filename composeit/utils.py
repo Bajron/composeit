@@ -1,5 +1,7 @@
 import dotenv
 import io
+from time import strftime, localtime
+import datetime
 
 
 def duration_to_seconds(duration):
@@ -36,6 +38,35 @@ def duration_text(seconds):
         return f"{round(seconds, 2)}s"
     else:
         return " ".join(r)
+
+
+def date_time_text(seconds):
+    lt = localtime(seconds)
+    dt = datetime.datetime.fromtimestamp(seconds)
+    if datetime.date.today() == dt.date():
+        return strftime("%H:%M:%S", lt)
+    else:
+        return strftime("%Y-%m-%d %H:%M:%S", lt)
+
+
+def cumulative_time_text(seconds):
+    D = 3600 * 24
+    H = 3600
+    M = 60
+
+    s = round(seconds)
+    d = s // D
+    s -= d * D
+    h = s // H
+    s -= h * H
+    m = s // M
+    s -= m * M
+
+    ds = f"{d}d" if d > 0 else ""
+    if seconds > 1:
+        return f"{ds}{h:02}{m:02}:{s:02}"
+    else:
+        return f"{round(seconds, 6)}"
 
 
 def resolve_string(s: str):
