@@ -217,34 +217,42 @@ class Compose:
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_logs_session(services))
+            await self.execute_client_session(self.make_logs_session(services))
         else:
             self.logger.error("Server is not running")
 
     def make_logs_session(self, services=None):
-        async def stream_logs_response(connector):
-            hostname = gethostname()
-            async with aiohttp.ClientSession(
-                base_url=f"http://{hostname}", connector=connector
-            ) as session:
-                response = await session.get(f"/")
+        async def stream_logs_response(session: aiohttp.ClientSession):
+            async with session.get(f"/") as response:
                 data = await response.json()
                 project = data["project_name"]
 
+            def logs_request():
                 if services is not None and len(services) == 1:
                     service = services[0]
-                    response = await session.get(f"/{project}/{service}/logs")
+                    return session.get(f"/{project}/{service}/logs")
                 else:
                     params = [("service", s) for s in services] if services else None
-                    response = await session.get(f"/{project}/logs", params=params)
+                    return session.get(f"/{project}/logs", params=params)
+
+            async with logs_request() as response:
+                close_requested = False
+
+                def signal_handler(signal, frame):
+                    nonlocal close_requested
+                    close_requested = True
+                    asyncio.get_event_loop().call_soon_threadsafe(response.close)
+
+                signal.signal(signal.SIGINT, signal_handler)
 
                 try:
                     async for line in response.content:
                         print(line.decode(), end="")
                 except asyncio.CancelledError:
                     self.logger.debug("Request cancelled")
-
-                return response
+                except aiohttp.ClientConnectionError as ex:
+                    if not close_requested:
+                        self.logger.warning("Connection error {ex}")
 
         return stream_logs_response
 
@@ -252,22 +260,17 @@ class Compose:
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_attach_session(service))
+            await self.execute_client_session(self.make_attach_session(service))
         else:
             self.logger.error("Server is not running")
 
     def make_attach_session(self, service):
-        async def client_session(connector):
-            hostname = gethostname()
-            async with aiohttp.ClientSession(
-                base_url=f"http://{hostname}", connector=connector
-            ) as session:
-                response = await session.get(f"/")
+        async def client_session(session: aiohttp.ClientSession):
+            async with session.get(f"/") as response:
                 data = await response.json()
                 project = data["project_name"]
 
-                ws = await session.ws_connect(f"/{project}/{service}/attach")
-
+            async with session.ws_connect(f"/{project}/{service}/attach") as ws:
                 exit_requested = False
 
                 def signal_handler(signal, frame):
@@ -300,8 +303,6 @@ class Compose:
                             await ws.send_str(input_line)
                 except asyncio.CancelledError:
                     self.logger.debug("Attach cancelled")
-
-                return response
 
         return client_session
 
