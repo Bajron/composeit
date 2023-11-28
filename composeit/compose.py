@@ -10,7 +10,6 @@ import pathlib
 import hashlib
 import copy
 import time
-import psutil
 from aiohttp import web, ClientConnectorError
 from json.decoder import JSONDecodeError
 
@@ -401,13 +400,10 @@ class Compose:
                 project_data = await response.json()
                 services = project_data["services"]
 
-            service_data = []
+            processes = []
             for s in services:
-                async with session.get(f"/{project}/{s}") as response:
-                    service_data.append(await response.json())
-
-            service_data.sort(key=lambda x: x["sequence"])
-            now = time.time()
+                async with session.get(f"/{project}/{s}/top") as response:
+                    processes.extend(await response.json())
 
             header = [
                 ("uid", "UID", 16),
@@ -424,32 +420,21 @@ class Compose:
                 fmt += f"{{{n}:{w}}} "
             self.logger.debug(f"Format is '{fmt}'")
 
-            def make_row(p: psutil.Process):
+            def make_row(p: dict):
                 row = {}
-                row["uid"] = p.username()
-                row["pid"] = p.pid
-                row["ppid"] = p.ppid()
-                row["c"] = p.cpu_percent()
-                row["stime"] = date_time_text(p.create_time())
-                row["tty"] = p.terminal() if hasattr(p, "terminal") else ""
-                row["time"] = cumulative_time_text(p.cpu_times().user)
-                row["cmd"] = " ".join(p.cmdline())
+                row["uid"] = p["username"]
+                row["pid"] = p["pid"]
+                row["ppid"] = p["ppid"]
+                row["c"] = p["cpu_percent"]
+                row["stime"] = date_time_text(p["create_time"])
+                row["tty"] = p["terminal"]
+                row["time"] = cumulative_time_text(p["cpu_times"]["user"])
+                row["cmd"] = " ".join(p["cmdline"])
                 return row
 
             info_rows = []
-            for s in service_data:
-                self.logger.debug(f"Service {s}")
-                pid = s["pid"]
-                if s["return_code"] is not None:
-                    continue
-                try:
-                    # TODO move this to the server for remote scenario
-                    p = psutil.Process(pid)
-                    info_rows.append(make_row(p))
-                    for ch in p.children(recursive=True):
-                        info_rows.append(make_row(ch))
-                except psutil.NoSuchProcess:
-                    pass
+            for process_info in processes:
+                info_rows.append(make_row(process_info))
 
             print(f"Project: {project}, in {compose_data['working_directory']}")
             print(fmt.format(**{k: v for k, v, _ in header}))
@@ -518,6 +503,11 @@ class Compose:
         self._get_project(request)
         service = self._get_service(request)
         return web.json_response(self.get_service_json(service))
+
+    async def get_service_processes(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        return web.json_response(self.services[service].get_processes_info())
 
     async def get_attach(self, request: web.Request):
         self._get_project(request)
@@ -669,6 +659,7 @@ class Compose:
                 web.get("/{project}/{service}/logs", self.get_service_logs),
                 web.post("/{project}/{service}/stop", self.post_stop_service),
                 web.post("/{project}/{service}/start", self.post_start_service),
+                web.get("/{project}/{service}/top", self.get_service_processes),
             ]
         )
 

@@ -105,6 +105,31 @@ class AsyncProcess:
     def request_build(self):
         self.execute_build = True
 
+    def get_processes_info(self):
+        def serialize_process(p: psutil.Process):
+            row = {}
+            row["username"] = p.username()
+            row["pid"] = p.pid
+            row["ppid"] = p.ppid()
+            row["cpu_percent"] = p.cpu_percent()
+            row["create_time"] = p.create_time()
+            row["terminal"] = p.terminal() if hasattr(p, "terminal") else ""
+            cpu_times = p.cpu_times()
+            row["cpu_times"] = {"user": cpu_times.user, "system": cpu_times.system}
+            row["cmdline"] = p.cmdline()
+            return row
+
+        processes = []
+        if self.rc is None:
+            try:
+                p = psutil.Process(self.process.pid)
+                processes.append(serialize_process(p))
+                for ch in p.children(recursive=True):
+                    processes.append(serialize_process(ch))
+            except psutil.NoSuchProcess:
+                pass
+        return processes
+
     def get_state(self):
         if self.terminated:
             return "terminated"
