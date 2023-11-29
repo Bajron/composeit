@@ -1,0 +1,8 @@
+services:
+  simple1:
+    command: python
+    args:
+      - ../../counter.py
+
+  simple2:
+    command: [python, ../../counter.py]
