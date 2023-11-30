@@ -11,6 +11,7 @@ from termcolor import colored
 from .utils import duration_to_seconds
 
 import traceback
+from typing import List
 
 
 def make_colored(color):
@@ -113,7 +114,7 @@ class AsyncProcess:
             row["ppid"] = p.ppid()
             row["cpu_percent"] = p.cpu_percent()
             row["create_time"] = p.create_time()
-            row["terminal"] = p.terminal() if hasattr(p, "terminal") else ""
+            row["terminal"] = p.terminal() if hasattr(p, "terminal") else "--"
             cpu_times = p.cpu_times()
             row["cpu_times"] = {"user": cpu_times.user, "system": cpu_times.system}
             row["cmdline"] = p.cmdline()
@@ -151,6 +152,23 @@ class AsyncProcess:
         self.log.removeHandler(handler)
         self.lout.removeHandler(handler)
         self.lerr.removeHandler(handler)
+
+    def _get_command(self) -> List[str]:
+        config = self.service_config
+        if config.get("shell", False):
+            # TODO, injections?
+            if "args" in config:
+                self.log.warning("args ignored with a shell command")
+            command = config["command"]
+            if not isinstance(command, str):
+                raise TypeError("Expected string for a command in shell mode")
+            return command
+        else:
+            command = (
+                config["command"] if isinstance(config["command"], list) else [config["command"]]
+            )
+            command.extend(config.get("args", []))
+            return command
 
     async def _make_process(self):
         service_config = self.service_config
@@ -215,27 +233,18 @@ class AsyncProcess:
         # else: # TODO: not sure yet if required on Linux, could be helpful for closing children
         #     popen_kw.update(start_new_session=True)
 
+        self.command = self._get_command()
         if service_config.get("shell", False):
-            # TODO, injections?
-            if "args" in service_config:
-                print(" ** args ignored with a shell command")
-
             process = await asyncio.create_subprocess_shell(
-                cmd=service_config["command"],
+                cmd=self.command,
                 stdin=asyncio.subprocess.PIPE,
                 stderr=stream_mode,
                 stdout=stream_mode,
                 **popen_kw,
             )
         else:
-            command = (
-                service_config["command"]
-                if isinstance(service_config["command"], list)
-                else [service_config["command"]]
-            )
-            command.extend(service_config.get("args", []))
             process = await asyncio.create_subprocess_exec(
-                *command,
+                *self.command,
                 stdin=asyncio.subprocess.PIPE,
                 stderr=stream_mode,
                 stdout=stream_mode,

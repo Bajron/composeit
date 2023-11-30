@@ -348,8 +348,8 @@ class Compose:
 
                 row = {}
                 row["name"] = s["name"]
-                # TODO: need processing from the process class
-                cmd = f'{s["config"]["command"]}'
+
+                cmd = " ".join(s["command"])
                 if len(cmd) > 30:
                     cmd = cmd[:27] + "..."
                 row["command"] = cmd
@@ -494,6 +494,7 @@ class Compose:
             "start_time": s.start_time,
             "stop_time": s.stop_time,
             "pid": s.process.pid,
+            "command": s.command,
             "return_code": s.rc,
             "pobject": s.popen_kw,
             "config": s.service_config,
@@ -816,14 +817,14 @@ from aiohttp.web import cast, Application, AppRunner, AccessLogger, NamedPipeSit
 async def run_server(app: Application, path: str, delete_pipe=True):
     # Adapted from aiohttp.web._run_app
     try:
-        print("Creating server", path)
+        logger = logging.getLogger("httpserver")
+        logger.setLevel(logging.DEBUG)
+        logger.debug(f"Creating server {path}")
+
         if asyncio.iscoroutine(app):
             app = await app  # type: ignore[misc]
 
         app = cast(Application, app)
-
-        logger = logging.getLogger("httpserver")
-        logger.setLevel(logging.DEBUG)
 
         runner = AppRunner(
             app,
@@ -842,6 +843,11 @@ async def run_server(app: Application, path: str, delete_pipe=True):
 
         for site in sites:
             await site.start()
+
+        logger.debug("Server created")
+        # Signal we create a server (might be unexpected)
+        print("Server created", path, flush=True)
+
         delay = 10
         while True:
             await asyncio.sleep(delay)
