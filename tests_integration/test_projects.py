@@ -4,8 +4,24 @@ import pytest
 import psutil
 import time
 import io
+import os
 
 tests_directory = pathlib.Path(__file__).parent
+
+
+# composeit processes usually spawn additional python processes
+# This function intends to simulate ctrl+c for simulated interactive calls
+def kill_deepest_child(pid):
+    try:
+        process = psutil.Process(pid)
+        ch = process.children()
+        while len(ch) > 0:
+            process = ch[0]
+            ch = process.children()
+        process.terminate()
+    except Exception as ex:
+        print("Problem in kill_deepest_child")
+        pass
 
 
 @pytest.fixture()
@@ -124,6 +140,89 @@ def test_diagnostic_on_side(process_cleaner):
 
         top_done = subprocess.run(["composeit", "top"], capture_output=True, cwd=service_directory)
         assert "Server is not running" in top_done.stderr.decode()
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        rc = up.wait(5)
+        assert rc is not None
+
+
+def test_logs_on_side(process_cleaner):
+    service_directory = tests_directory / "projects" / "simple"
+
+    try:
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        process_cleaner.append(up)
+
+        # Note: need to wait for it to start the server
+        first_line = up.stdout.readline().decode()
+        assert first_line.startswith("Server created")
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        log_all = subprocess.Popen(
+            ["composeit", "logs"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=service_directory,
+            env=env,
+        )
+        process_cleaner.append(log_all)
+
+        log_1 = subprocess.Popen(
+            ["composeit", "logs", "simple1"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=service_directory,
+            env=env,
+        )
+        process_cleaner.append(log_1)
+
+        log_2 = subprocess.Popen(
+            ["composeit", "logs", "simple2"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=service_directory,
+            env=env,
+        )
+        process_cleaner.append(log_2)
+
+        attach_for_log = subprocess.Popen(
+            ["composeit", "attach", "simple2"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=service_directory,
+            env=env,
+        )
+        process_cleaner.append(attach_for_log)
+
+        out = [log_all.stdout.readline().decode() for _ in range(6)]
+        kill_deepest_child(log_all.pid)
+        s1 = [int(s.replace("simple1:", "").strip()) for s in out if "simple1" in s]
+        s2 = [int(s.replace("simple2:", "").strip()) for s in out if "simple2" in s]
+
+        def is_sequence(s):
+            return len(s) > 0 and all(map(lambda x: x == 1, [a - b for a, b in zip(s[1:], s[:-1])]))
+
+        assert is_sequence(s1)
+        assert is_sequence(s2)
+
+        # Single log and attachment provides raw input
+
+        out = [log_1.stdout.readline().decode() for _ in range(6)]
+        kill_deepest_child(log_1.pid)
+        s1 = [int(s.strip()) for s in out]
+        assert is_sequence(s1)
+
+        out = [log_2.stdout.readline().decode() for _ in range(6)]
+        kill_deepest_child(log_2.pid)
+        s2 = [int(s.strip()) for s in out]
+        assert is_sequence(s2)
+
+        out = [attach_for_log.stdout.readline().decode() for _ in range(6)]
+        kill_deepest_child(attach_for_log.pid)
+        s2 = [int(s.strip()) for s in out]
+        assert is_sequence(s2)
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)

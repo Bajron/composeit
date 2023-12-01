@@ -13,7 +13,7 @@ def main():
     counter = 0
     while run:
         print(counter, flush=True)
-        time.sleep(1)
+        time.sleep(0.1)
         counter += 1
 
 
