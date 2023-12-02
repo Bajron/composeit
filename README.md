@@ -21,7 +21,7 @@ or in `bash`
 source ./venv/bin/activate
 ```
 
-Install the package in editable mode
+Install the package in editable mode. Use development variant to run tests etc.
 ```
 pip install -e .[dev]
 ```
@@ -29,6 +29,11 @@ pip install -e .[dev]
 See what is possible for now
 ```
 composeit --help
+```
+
+Run tests
+```
+pytest
 ```
 
 ## Manual test
@@ -50,17 +55,14 @@ composeit -f ./test/win/composeit.yml --test-server
 
 ## Why?
 
-I wanted to organize a couple of processes on Windows,
-but I could not find a package that does that.
+I wanted to organize a couple of processes on Windows, but I could not find a package that does that.
 
 I wanted `docker-compose` without Docker.
 
-There is `supervisor` that could do the trick,
-but it is not supported on Windows.
+There is `supervisor` that could do the trick, but it is not supported on Windows.
 I also is quite a serious package...
 
-There are similar things like `pypyr` or `prefect`,
-but they kind of do a different thing.
+There are similar things like `pypyr` or `prefect`, but they kind of do a different thing.
 I wanted to organize a set of long running processes, not a pipeline.
 
 Later I also found `honcho`, seems ok for the task.
