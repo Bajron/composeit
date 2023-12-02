@@ -6,7 +6,8 @@ import logging
 import dotenv
 import asyncio
 import pprint
-
+import traceback
+import io
 
 from .compose import Compose
 
@@ -126,42 +127,48 @@ def main():
             print("Provided environment file does not exist", file=sys.stderr)
             return 1
 
-    compose = Compose(project_name, working_directory, service_files, verbose=options.verbose, use_color=use_color)
+    try:
+        compose = Compose(project_name, working_directory, service_files, verbose=options.verbose, use_color=use_color)
 
-    if options.test_server is not None:
-        compose.test_server(options.test_server, "GET")
-        return 0
-    elif options.test_server_post is not None:
-        compose.test_server(options.test_server_post, "POST")
-        return 0
-    elif hasattr(options, "command") and options.command is not None:
-        services = None
-        if hasattr(options, "service") and len(options.service) > 0:
-            services = options.service
+        if options.test_server is not None:
+            compose.test_server(options.test_server, "GET")
+            return 0
+        elif options.test_server_post is not None:
+            compose.test_server(options.test_server_post, "POST")
+            return 0
+        elif hasattr(options, "command") and options.command is not None:
+            services = None
+            if hasattr(options, "service") and len(options.service) > 0:
+                services = options.service
 
-        if options.command == "up":
-            return asyncio.run(compose.up(services))
-        elif options.command == "start":
-            return asyncio.run(compose.start(services))
-        elif options.command == "build":
-            return asyncio.run(compose.build(services))
-        elif options.command == "down":
-            return asyncio.run(compose.down(services))
-        elif options.command == "stop":
-            return asyncio.run(compose.stop(services))
-        elif options.command == "logs":
-            return asyncio.run(compose.logs(services))
-        elif options.command == "attach":
-            return asyncio.run(compose.attach(services[0]))
-        elif options.command == "config":
-            return pprint.pprint(compose.service_config)
-        elif options.command == "ps":
-            return asyncio.run(compose.ps())
-        elif options.command == "top":
-            return asyncio.run(compose.top())
-        else:
-            print(f"Unhandled option {options.command}")
-            return 10
+            if options.command == "up":
+                return asyncio.run(compose.up(services))
+            elif options.command == "start":
+                return asyncio.run(compose.start(services))
+            elif options.command == "build":
+                return asyncio.run(compose.build(services))
+            elif options.command == "down":
+                return asyncio.run(compose.down(services))
+            elif options.command == "stop":
+                return asyncio.run(compose.stop(services))
+            elif options.command == "logs":
+                return asyncio.run(compose.logs(services))
+            elif options.command == "attach":
+                return asyncio.run(compose.attach(services[0]))
+            elif options.command == "config":
+                return pprint.pprint(compose.service_config)
+            elif options.command == "ps":
+                return asyncio.run(compose.ps())
+            elif options.command == "top":
+                return asyncio.run(compose.top())
+            else:
+                cfg_log.error(f"Unhandled option {options.command}")
+                return 10
+    except FileNotFoundError as ex:
+        buffer = io.StringIO()
+        traceback.print_exc(file=buffer)
+        cfg_log.debug(buffer.getvalue())
+        cfg_log.error(f"File not found {ex.filename}")
     else:
         parser.print_help()
         return 1

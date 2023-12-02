@@ -1,8 +1,18 @@
 import signal
 import time
+import argparse
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        prog="counter",
+        description="Print integer sequence on the screen",
+    )
+    parser.add_argument("-s", "--start", default=0, type=int, help="First element of the sequence")
+    parser.add_argument("-d", "--delta", default=1, type=int, help="Increment of the sequence")
+    parser.add_argument("-t", "--time", default=1.0, type=float, help="Sleep time between output")
+    options = parser.parse_args()
+
     run = True
 
     def signal_handler(signal, frame):
@@ -10,11 +20,11 @@ def main():
         run = False
 
     signal.signal(signal.SIGINT, signal_handler)
-    counter = 0
+    counter = options.start
     while run:
         print(counter, flush=True)
-        time.sleep(0.1)
-        counter += 1
+        time.sleep(options.time)
+        counter += options.delta
 
 
 if __name__ == "__main__":

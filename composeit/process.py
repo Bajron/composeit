@@ -168,7 +168,9 @@ class AsyncProcess:
                 config["command"] if isinstance(config["command"], list) else [config["command"]]
             )
             command.extend(config.get("args", []))
-            return command
+            # We can get ints from YAML parsing here, so make everything a string
+            # TODO: is it a problem if we get recursive list here or a map even?
+            return [f"{c}" for c in command]
 
     async def _make_process(self):
         service_config = self.service_config

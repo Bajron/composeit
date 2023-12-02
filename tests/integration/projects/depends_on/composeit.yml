@@ -1,0 +1,11 @@
+services:
+  leaf:
+    depends_on: middle
+    command: [python, ../../counter.py, --time, 2]
+
+  middle:
+    depends_on: root
+    command: [python, ../../counter.py, --time, 2]
+
+  root:
+    command: [python, ../../counter.py, --time, 2]
