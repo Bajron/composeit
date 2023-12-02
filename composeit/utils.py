@@ -2,7 +2,12 @@ import dotenv
 import io
 from time import strftime, localtime
 import datetime
+import traceback
 
+def get_stack_string():
+    buffer = io.StringIO()
+    traceback.print_exc(file=buffer)
+    return buffer.getvalue()
 
 def duration_to_seconds(duration):
     if isinstance(duration, (int, float)):

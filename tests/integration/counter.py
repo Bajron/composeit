@@ -1,6 +1,7 @@
 import signal
 import time
 import argparse
+import sys
 
 
 def main():
@@ -11,6 +12,8 @@ def main():
     parser.add_argument("-s", "--start", default=0, type=int, help="First element of the sequence")
     parser.add_argument("-d", "--delta", default=1, type=int, help="Increment of the sequence")
     parser.add_argument("-t", "--time", default=1.0, type=float, help="Sleep time between output")
+    parser.add_argument("-e", "--exit", default=None, type=int, help="Value after which to exit")
+    parser.add_argument("-r", "--return-code", default=0, type=int, help="Application return code")
     options = parser.parse_args()
 
     run = True
@@ -25,7 +28,10 @@ def main():
         print(counter, flush=True)
         time.sleep(options.time)
         counter += options.delta
+        if options.exit is not None and counter > options.exit:
+            run = False
+    return options.return_code
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

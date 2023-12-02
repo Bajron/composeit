@@ -6,10 +6,9 @@ import logging
 import dotenv
 import asyncio
 import pprint
-import traceback
-import io
 
 from .compose import Compose
+from .utils import get_stack_string
 
 
 def main():
@@ -19,10 +18,17 @@ def main():
     )
     cfg_log = logging.getLogger("config")
     parser.add_argument(
-        "-f", "--file", default=[], action="append", type=pathlib.Path, help="Compose configuration file"
+        "-f",
+        "--file",
+        default=[],
+        action="append",
+        type=pathlib.Path,
+        help="Compose configuration file",
     )
     parser.add_argument("-p", "--project-name", default=None, type=str, help="Project name")
-    parser.add_argument("--project-directory", default=None, type=pathlib.Path, help="Alternate working directory")
+    parser.add_argument(
+        "--project-directory", default=None, type=pathlib.Path, help="Alternate working directory"
+    )
     parser.add_argument("--env-file", default=[], action="append", type=pathlib.Path)
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--no-color", default=False, action="store_true")
@@ -128,7 +134,13 @@ def main():
             return 1
 
     try:
-        compose = Compose(project_name, working_directory, service_files, verbose=options.verbose, use_color=use_color)
+        compose = Compose(
+            project_name,
+            working_directory,
+            service_files,
+            verbose=options.verbose,
+            use_color=use_color,
+        )
 
         if options.test_server is not None:
             compose.test_server(options.test_server, "GET")
@@ -165,9 +177,7 @@ def main():
                 cfg_log.error(f"Unhandled option {options.command}")
                 return 10
     except FileNotFoundError as ex:
-        buffer = io.StringIO()
-        traceback.print_exc(file=buffer)
-        cfg_log.debug(buffer.getvalue())
+        cfg_log.debug(get_stack_string())
         cfg_log.error(f"File not found {ex.filename}")
     else:
         parser.print_help()

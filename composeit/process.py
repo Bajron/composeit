@@ -8,7 +8,7 @@ import time
 import dotenv
 import io
 from termcolor import colored
-from .utils import duration_to_seconds
+from .utils import duration_to_seconds, get_stack_string
 
 import traceback
 from typing import List
@@ -52,13 +52,19 @@ class AsyncProcess:
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
         self.process: asyncio.subprocess.Process = None
+        self.command = self._get_command()
         self.start_time = None
         self.stop_time = None
         self.watch_coro = None
         self.sleep_task = None
 
         self.restart_policy = service_config.get("restart", "no")
-        assert self.restart_policy in RestartPolicyOptions
+        # YAML translates no to False
+        if self.restart_policy == False:
+            self.restart_policy = "no"
+        assert (
+            self.restart_policy in RestartPolicyOptions
+        ), f"restart value must be in {RestartPolicyOptions}, recieved {self.restart_policy}"
 
         self.restart_policy_config = {
             "delay": 5,
@@ -287,7 +293,7 @@ class AsyncProcess:
         self.restarting = True
 
         max_attempts = self.restart_policy_config["max_attempts"]
-        attempt = 1
+        attempt = 0
         self.log.debug(
             f"Resolving restart for {self.name}, attempt={attempt}, terminated={self.terminated}, stopped={self.stopped}"
         )
@@ -356,15 +362,16 @@ class AsyncProcess:
 
                     self.log.info(f"Restart policy is {self.restart_policy}")
                     process_started = await self._resolve_restart()
+                    self.stopped = not process_started
                     self.restarting = False
             except FileNotFoundError as ex:
                 self.log.error(f"Error running command {self.name} {ex}")
                 self.exception = ex
                 break
             except Exception as ex:
-                traceback.print_exc()
+                self.log.debug(get_stack_string())
                 self.log.error(f"Exception '{ex}'")
-                raise
+                break
             await self.resolve_clean()
 
         self.log.debug("Restart loop exited")

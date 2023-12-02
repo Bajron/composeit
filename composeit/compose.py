@@ -18,8 +18,7 @@ from typing import List, Dict
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
-from .utils import resolve, duration_text, cumulative_time_text, date_time_text
-
+from .utils import resolve, duration_text, cumulative_time_text, date_time_text, get_stack_string
 from socket import gethostname
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
@@ -314,7 +313,7 @@ class Compose:
             self.logger.error("Server is not running")
 
     def make_ps_session(self):
-        async def client_session(session):
+        async def client_session(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 compose_data = await response.json()
                 project = compose_data["project_name"]
@@ -354,19 +353,23 @@ class Compose:
                     cmd = cmd[:27] + "..."
                 row["command"] = cmd
 
-                since_build = (now - s["build_time"]) if s["build_time"] else None
+                since_build = (now - s["build_time"]) if s["build_time"] is not None else None
                 row["created"] = (
                     f"{duration_text(since_build)} ago" if since_build is not None else "--"
                 )
 
                 state = s["state"]
                 if state == "started":
-                    since_start = (now - s["start_time"]) if s["start_time"] else None
+                    since_start = (now - s["start_time"]) if s["start_time"] is not None else None
                     row["status"] = f"Up {duration_text(since_start)}"
                 elif state == "stopped":
-                    since_stop = (now - s["stop_time"]) if s["stop_time"] else None
+                    since_stop = (now - s["stop_time"]) if s["stop_time"] is not None else None
                     rc = s["return_code"]
-                    row["status"] = f"exited ({rc}) {duration_text(since_stop)} ago"
+                    row["status"] = (
+                        f"exited ({rc}) {duration_text(since_stop)} ago"
+                        if since_stop is not None
+                        else "stopped"
+                    )
                 elif state == "terminated":
                     since_stop = (now - s["stop_time"]) if s["stop_time"] else None
                     row["status"] = f"terminated {duration_text(since_stop)} ago"
@@ -493,7 +496,7 @@ class Compose:
             "build_time": s.build_time,
             "start_time": s.start_time,
             "stop_time": s.stop_time,
-            "pid": s.process.pid,
+            "pid": s.process.pid if s.process is not None else None,
             "command": s.command,
             "return_code": s.rc,
             "pobject": s.popen_kw,
@@ -728,6 +731,7 @@ class Compose:
             await asyncio.gather(*[s.watch() for s in self.services.values()])
             self.logger.debug("Services closed")
         except Exception as ex:
+            self.logger.debug(get_stack_string())
             self.logger.debug(f"Exception during watching services: {ex}")
             self.shutdown()
 
@@ -742,9 +746,9 @@ class Compose:
         try:
             return await self.execute_with_connector(session_function)
         except ClientConnectorError as ex:
-            self.logger.error(f" ** Connection error for {self.communication_pipe}: {ex}")
+            self.logger.error(f"Connection error for {self.communication_pipe}: {ex}")
         except FileNotFoundError as ex:
-            self.logger.error(f" ** Name error for {self.communication_pipe}: {ex}")
+            self.logger.error(f"Name error for {self.communication_pipe}: {ex}")
         return None
 
     async def execute_with_connector(self, connector_function):
