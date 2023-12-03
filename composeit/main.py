@@ -134,12 +134,14 @@ def main():
             return 1
 
     try:
+        defer_config_load = options.command in ["ps", "top", "logs", "attach"]
         compose = Compose(
             project_name,
             working_directory,
             service_files,
             verbose=options.verbose,
             use_color=use_color,
+            defer_config_load=defer_config_load,
         )
 
         if options.test_server is not None:

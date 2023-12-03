@@ -36,7 +36,7 @@ class ColorAssigner:
 
 class Compose:
     def __init__(
-        self, project_name, working_directory, service_files, verbose=False, use_color=True
+        self, project_name, working_directory, service_files, verbose=False, use_color=True, defer_config_load=False,
     ) -> None:
         self.project_name = project_name
         self.working_directory = working_directory
@@ -56,15 +56,20 @@ class Compose:
         self.color_assigner = ColorAssigner()
 
         self.service_files = service_files
-        self.service_config = {}
-        self._parse_service_config()
+        self.service_config = {"services": []}
 
         self.depending = None
         self.depends = None
-        self._update_dependencies()
+
+        if not defer_config_load:
+            self.load_service_config()
 
         self.services: Dict[str, AsyncProcess] = {}
         self.app = None
+
+    def load_service_config(self):
+        self._parse_service_config()
+        self._update_dependencies()
 
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
@@ -651,8 +656,8 @@ class Compose:
         return web.json_response(message)
 
     def start_server(self):
-        app = web.Application()
-        app.add_routes(
+        self.app = web.Application()
+        self.app.add_routes(
             [
                 web.get("/", self.get_call),
                 web.get("/{project}", self.get_project),
@@ -667,7 +672,7 @@ class Compose:
             ]
         )
 
-        asyncio.get_event_loop().create_task(run_server(app, self.communication_pipe))
+        asyncio.get_event_loop().create_task(run_server(self.app, self.communication_pipe))
 
     def shutdown(self, request_clean=False):
         self.logger.info(" *** Calling terminate on sub processes")
@@ -892,15 +897,29 @@ def merge_in(base, incoming):
     return base
 
 
+def merge_command_sequence(base, incoming):
+    for key, value in incoming.items():
+        if key not in base:
+            base[key] = value
+        else:
+            base_value = base[key]
+            if isinstance(value, list):
+                base_value += value
+            else:
+                base_value += [value]
+    return base
+
+
 def merge_services(base, incoming):
     for key, value in incoming.items():
         if key not in base:
             base[key] = value
         else:
             base_value = base[key]
-            # TODO bulid and clean needs special rule
             if key in ["command"]:  # TODO: which commands not to merge?
                 base[key] = value
+            elif key == ["build", "clean"]:
+                base[key] = merge_command_sequence(base[key], incoming[key])
             elif isinstance(base_value, list):
                 if isinstance(value, list):
                     base_value += value

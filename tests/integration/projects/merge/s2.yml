@@ -1,0 +1,3 @@
+services:
+  simple2:
+    command: [python, ../../counter.py, --time, '0.1']
