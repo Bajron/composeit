@@ -4,6 +4,7 @@ import subprocess
 import pytest
 import time
 import io
+from typing import List
 
 tests_directory = pathlib.Path(__file__).parent
 
@@ -23,14 +24,14 @@ def kill_deepest_child(pid):
         pass
 
 
-def is_sequence(s: list[int]):
+def is_sequence(s: List[int]):
     """Verifies if the provided list is an integer sequence incrementing by 1"""
     return len(s) > 0 and all(map(lambda x: x == 1, [a - b for a, b in zip(s[1:], s[:-1])]))
 
 
 @pytest.fixture()
 def process_cleaner():
-    to_clean: list[subprocess.Popen] = []
+    to_clean: List[subprocess.Popen] = []
     yield to_clean
     for process in to_clean:
         try:
