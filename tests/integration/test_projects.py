@@ -233,6 +233,154 @@ def test_logs_on_side(process_cleaner):
         assert rc is not None
 
 
+def test_start_by_pointed_file(process_cleaner):
+    try:
+        service_directory = tests_directory / "projects" / "simple"
+        service_file = service_directory / "composeit.yml"
+
+        # Note no CWD set in here
+        up = subprocess.Popen(["composeit", "-f", str(service_file), "up"], stdout=subprocess.PIPE)
+        process_cleaner.append(up)
+        first_line = up.stdout.readline().decode()
+        assert first_line.startswith("Server created")
+
+        services = ps(tests_directory)
+        assert services is None
+
+        services = ps(service_directory)
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        subprocess.call(
+            ["composeit", "--project-directory", str(service_directory), "down", "simple1"]
+        )
+        services = ps(service_directory)
+        assert services["simple1"] == "exited"
+        assert services["simple2"] == "up"
+
+        # Project name is redundant here, but just for testing
+        subprocess.call(
+            [
+                "composeit",
+                "-f",
+                str(service_file),
+                "--project-name",
+                service_directory.name,
+                "down",
+                "simple2",
+            ]
+        )
+        services = ps(service_directory)
+        assert services["simple1"] == "exited"
+        assert services["simple2"] == "exited"
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        rc = up.wait(5)
+        assert rc is not None
+
+
+def test_start_by_file_with_name(process_cleaner):
+    try:
+        service_directory = tests_directory / "projects" / "simple"
+        service_file = service_directory / "composeit.yml"
+
+        # Note no CWD set in here
+        up1 = subprocess.Popen(
+            ["composeit", "-f", str(service_file), "--project-name", "1", "up"],
+            stdout=subprocess.PIPE,
+        )
+        process_cleaner.append(up1)
+        up2 = subprocess.Popen(
+            ["composeit", "-f", str(service_file), "--project-name", "2", "up"],
+            stdout=subprocess.PIPE,
+        )
+        process_cleaner.append(up2)
+
+        first_line = up1.stdout.readline().decode()
+        assert first_line.startswith("Server created")
+
+        first_line = up2.stdout.readline().decode()
+        assert first_line.startswith("Server created")
+
+        services = ps(tests_directory)
+        assert services is None
+
+        # No results without project name
+        services = ps(service_directory)
+        assert services is None
+
+        services = ps(service_directory, "--project-name", "1")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        services = ps(service_directory, "--project-name", "2")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        # No results without project name
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+
+        services = ps(service_directory, "--project-name", "1")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        services = ps(service_directory, "--project-name", "2")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        # Closing a service in project "1" leaves "2" unaffected
+        subprocess.call(
+            ["composeit", "--project-name", "1", "down", "simple1"], cwd=service_directory
+        )
+
+        services = ps(tests_directory, "-f", str(service_file), "--project-name", "1")
+        assert len(services) == 2
+        assert services["simple1"] == "exited"
+        assert services["simple2"] == "up"
+
+        services = ps(tests_directory, "-f", str(service_file), "--project-name", "2")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        # Close project 1, the other one should be unaffected
+        subprocess.call(["composeit", "--project-name", "1", "down"], cwd=service_directory)
+
+        services = ps(service_directory, "--project-name", "1")
+        assert services is None
+
+        # Test 3 different ways to specify the project
+        services = ps(service_directory, "--project-name", "2")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        services = ps(tests_directory, "-f", str(service_file), "--project-name", "2")
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+        services = ps(
+            tests_directory, "--project-directory", str(service_directory), "--project-name", "2"
+        )
+        assert len(services) == 2
+        assert services["simple1"] == "up"
+        assert services["simple2"] == "up"
+
+    finally:
+        subprocess.call(["composeit", "--project-name", "1", "down"], cwd=service_directory)
+        subprocess.call(["composeit", "--project-name", "2", "down"], cwd=service_directory)
+        rc = up1.wait(5)
+        assert rc is not None
+        rc = up2.wait(5)
+        assert rc is not None
+
+
 def test_attach(process_cleaner):
     service_directory = tests_directory / "projects" / "input"
 
@@ -296,18 +444,36 @@ def ps_split_to_state(split):
     return None
 
 
-def ps(service_directory):
+def ps(service_directory, *args):
     header_lines = 2
-    ps_output = subprocess.check_output(["composeit", "ps"], cwd=service_directory)
+    ps_output = subprocess.check_output(
+        ["composeit", *[str(a) for a in args], "ps"], cwd=service_directory
+    )
     ps_lines = [l.decode().strip() for l in io.BytesIO(ps_output).readlines()]
+    if (
+        len(ps_lines) < 2
+        or not ps_lines[0].startswith("Project")
+        or not ps_lines[1].startswith("NAME")
+    ):
+        # Bad call, not even receiveing a header
+        return None
     states = {sp[0]: ps_split_to_state(sp) for sp in [ps.split() for ps in ps_lines[header_lines:]]}
     return states
 
 
-def top(service_directory):
+def top(service_directory, *args):
     header_lines = 2
-    top_output = subprocess.check_output(["composeit", "top"], cwd=service_directory)
+    top_output = subprocess.check_output(
+        ["composeit", *[str(a) for a in args], "top"], cwd=service_directory
+    )
     top_lines = [l.decode().strip() for l in io.BytesIO(top_output).readlines()]
+    if (
+        len(top_lines) < 2
+        or not top_lines[0].startswith("Project")
+        or not top_lines[1].startswith("UID")
+    ):
+        # Bad call, not even receiveing a header
+        return None
     return top_lines[header_lines:]
 
 

@@ -871,7 +871,7 @@ def get_comm_pipe(directory_path: pathlib.Path, project_name: str = None):
         h = hashlib.sha256(str(directory_path.resolve()).encode()).hexdigest()
         return r"\\.\pipe\composeit_" + f"{project_name}_{h}"
 
-    return str(directory_path / ".daemon")
+    return str(directory_path / f".{project_name}.daemon")
 
 
 def merge_configs(parsed_files):
