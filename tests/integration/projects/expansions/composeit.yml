@@ -1,0 +1,65 @@
+x-show_variables: &app_template
+  command: python
+  args:
+    - ../../echo.py
+    - --environment=ENV_BY_MAP
+    - --environment=ENV_INT_MAP
+    - --environment=ENV_BY_LIST
+    - --environment=ENV_INT_LIST
+
+    - --environment=FROM_DOT_ENV
+    - --environment=FROM_ENV
+    - --environment=DOT_AND_ENV
+    - --environment=NOT_EXPANDED
+    - --environment=EMPTY
+    - --environment=COMPOSEIT_NOT_EXISTENT
+    - --environment=FROM_ENV_SAVED
+    - --environment=FROM_ENV_OVERRIDEN
+    - --environment=COPIED_FROM_ENV
+    - --environment=VERBATIM_FROM_ENV
+    # NOTE: the values below should expand to empty strings,
+    #       they are not set yet when constructing the call
+    - --value=ENV_BY_MAP=${ENV_BY_MAP}
+    - --value=ENV_INT_MAP=${ENV_INT_MAP}
+    - --value=ENV_BY_LIST=${ENV_BY_LIST}
+    - --value=ENV_INT_LIST=${ENV_INT_LIST}
+    - --value=COPIED_FROM_ENV=${COPIED_FROM_ENV}
+    - --value=VERBATIM_FROM_ENV=${VERBATIM_FROM_ENV}
+
+    - --value=FROM_DOT_ENV=${FROM_DOT_ENV}
+    - --value=FROM_ENV=${FROM_ENV}
+    - --value=DOT_AND_ENV=${DOT_AND_ENV}
+    - --value=NOT_EXPANDED=${NOT_EXPANDED}
+    - --value=EMPTY=${EMPTY}
+    - --value=COMPOSEIT_NOT_EXISTENT=${COMPOSEIT_NOT_EXISTENT}
+    - --value=FROM_ENV_SAVED=${FROM_ENV_SAVED}
+    - --value=FROM_ENV_OVERRIDEN=${FROM_ENV_OVERRIDEN}
+
+services:
+  env_test_map:
+    <<: *app_template
+    environment:
+      ENV_BY_MAP: from map
+      ENV_INT_MAP: 1
+      FROM_ENV_OVERRIDEN: zaz
+      COPIED_FROM_ENV: 'copy: ${FROM_ENV}'
+      VERBATIM_FROM_ENV: 'verbatim: $${FROM_ENV}'
+
+  env_test_list:
+    <<: *app_template
+    environment:
+      - ENV_BY_LIST=from list
+      - ENV_INT_LIST=2
+      - FROM_ENV_OVERRIDEN=zaz
+      - COPIED_FROM_ENV='copy ${FROM_ENV}'
+      - VERBATIM_FROM_ENV='verbatim $${FROM_ENV}'
+
+  env_test_suppress:
+    <<: *app_template
+    inherit_environment: false
+    environment:
+      - ENV_BY_LIST="from list"
+      - ENV_INT_LIST="3"
+      - FROM_ENV_OVERRIDEN='zzz'
+      - COPIED_FROM_ENV="copy ${FROM_ENV}"
+      - VERBATIM_FROM_ENV="verbatim $${FROM_ENV}"

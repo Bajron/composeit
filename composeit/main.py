@@ -50,12 +50,24 @@ def main():
     parser_up = subparsers.add_parser("up", help="Startup the services")
     parser_up.add_argument("--build", default=False, action="store_true", help="Rebuild services")
     parser_up.add_argument("service", nargs="*", help="Specific service to start")
+    parser_up.add_argument(
+        "--no-start",
+        default=False,
+        action="store_true",
+        help="Do not start services. Daemon stays started.",
+    )
 
-    parser_up = subparsers.add_parser("start", help="Startup the services")
-    parser_up.add_argument("service", nargs="*", help="Specific service to start")
+    parser_start = subparsers.add_parser("start", help="Startup the services")
+    parser_start.add_argument("service", nargs="*", help="Specific service to start")
+    parser_start.add_argument(
+        "--no-start",
+        default=False,
+        action="store_true",
+        help="Do not start services. Daemon stays started.",
+    )
 
-    parser_up = subparsers.add_parser("build", help="Build the services")
-    parser_up.add_argument("service", nargs="*", help="Specific service to build")
+    parser_build = subparsers.add_parser("build", help="Build the services")
+    parser_build.add_argument("service", nargs="*", help="Specific service to build")
 
     parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
     parser_down.add_argument("service", nargs="*", help="Specific service to close")
@@ -154,6 +166,9 @@ def main():
             services = None
             if hasattr(options, "service") and len(options.service) > 0:
                 services = options.service
+
+            if hasattr(options, "no_start") and options.no_start:
+                services = []
 
             if options.command == "up":
                 return asyncio.run(compose.up(services))

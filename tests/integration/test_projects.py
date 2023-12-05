@@ -456,30 +456,7 @@ def test_restarting(process_cleaner):
 
         subprocess.call(["composeit", "stop", "always"], cwd=service_directory)
 
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-
-        log_all = subprocess.Popen(
-            ["composeit", "logs"],
-            stdout=subprocess.PIPE,
-            cwd=service_directory,
-            env=env,
-        )
-        log_out = None
-
-        def read_filtered():
-            nonlocal log_out
-            log_out = []
-            services = "|".join(states.keys())
-            log_line = re.compile(f"^(?P<service>{services}):\\s+(?P<log>.*)$")
-            for l in [l.decode().strip() for l in log_all.stdout.readlines()]:
-                m = log_line.match(l)
-                if not m:
-                    continue
-                log_out.append((m["service"], m["log"].strip()))
-
-        t = threading.Thread(target=read_filtered)
-        t.start()
+        logs = LogsGatherer(service_directory, states.keys())
 
         subprocess.call(["composeit", "start"], cwd=service_directory)
         # TODO: better solution is welcome
@@ -501,17 +478,14 @@ def test_restarting(process_cleaner):
         rc = up.wait(5)
 
         # Logs should stop as well because of server disconnection
-        t.join()
+        logs.join()
 
-        def get_service_logs(service):
-            return list(map(lambda x: int(x[1]), filter(lambda x: x[0] == service, log_out)))
-
-        assert is_sequence(get_service_logs("always"))
+        assert is_sequence(logs.get_service("always"))
         for quick4 in ["not_restarting", "one_shot", "one_time", "one_try", "one_run"]:
-            assert [0, 1, 2, 3] == get_service_logs(quick4), f"Not matching for {quick4}"
+            assert [0, 1, 2, 3] == logs.get_service(quick4), f"Not matching for {quick4}"
 
         # First run plus 3 restart attempts
-        assert [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2] == get_service_logs("fail_restart")
+        assert [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2] == logs.get_service("fail_restart")
 
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)

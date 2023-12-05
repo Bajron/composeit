@@ -4,6 +4,9 @@ import subprocess
 import pytest
 import time
 import io
+import re
+import os
+import threading
 from typing import List
 
 tests_directory = pathlib.Path(__file__).parent
@@ -99,3 +102,36 @@ def top(service_directory, *args):
         # Bad call, not even receiveing a header
         return None
     return top_lines[header_lines:]
+
+
+class LogsGatherer:
+    def __init__(self, service_directory, services) -> None:
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        self.log_all = subprocess.Popen(
+            ["composeit", "logs"],
+            stdout=subprocess.PIPE,
+            cwd=service_directory,
+            env=env,
+        )
+        self.log_out = None
+
+        self.reading_thread = threading.Thread(target=self.read_filtered, args=(services,))
+        self.reading_thread.start()
+
+    def get_service(self, service):
+        return list(map(lambda x: int(x[1]), filter(lambda x: x[0] == service, self.log_out)))
+
+    def read_filtered(self, services):
+        self.log_out = []
+        services = "|".join(services)
+        log_line = re.compile(f"^(?P<service>{services}):\\s+(?P<log>.*)$")
+        for l in [l.decode().strip() for l in self.log_all.stdout.readlines()]:
+            m = log_line.match(l)
+            if not m:
+                continue
+            self.log_out.append((m["service"], m["log"].strip()))
+
+    def join(self):
+        self.reading_thread.join()

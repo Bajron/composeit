@@ -206,14 +206,22 @@ class AsyncProcess:
             if isinstance(env_definition, str):
                 env_definition = [env_definition]
             if isinstance(env_definition, list):
-                entries = [dotenv.dotenv_values(stream=io.StringIO(e)) for e in env_definition]
+
+                def make(e):
+                    try:
+                        return dotenv.dotenv_values(stream=io.StringIO(e))
+                    except Exception as ex:
+                        self.log.warning(f"Error parsing environment element ({e}): {ex}")
+                        return {}
+
+                entries = [make(e) for e in env_definition]
                 to_add = {
                     k: v if v is not None else os.environ.get(k, "")
                     for d in entries
                     for k, v in d.items()
                 }
             if isinstance(env_definition, dict):
-                to_add = env_definition
+                to_add = {k: str(v) for k, v in env_definition.items()}
             env.update(to_add)
 
         stream_mode = asyncio.subprocess.PIPE

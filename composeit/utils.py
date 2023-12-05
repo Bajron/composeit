@@ -80,12 +80,14 @@ def resolve_string(s: str):
     #       We are working on that though B]
     #       https://github.com/Bajron/python-dotenv
     anti_variable = s.replace("$$", "<<dolar>>")
-    expand = dotenv.dotenv_values(stream=io.StringIO(f'X="{anti_variable}"'))["X"]
+
+    # This requires handling equal signs inside?
+    #expand = dotenv.dotenv_values(stream=io.StringIO(f'X="{anti_variable}"'))["X"]
+
+    expand = dotenv.main.resolve_variables([("H", f"{anti_variable}")], override=True)["H"]
     return expand.replace("<<dolar>>", "$")
 
-    return dotenv.main.resolve_variables({"H": f"{s}"})["H"]
     # TODO: single quotes
-    # TODO: new interface after change
 
 
 def resolve(value):
