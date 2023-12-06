@@ -27,11 +27,14 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    print("Values:", flush=True)
     for v in options.value:
         print(v, flush=True)
+    print("Variables:", flush=True)
     for e in options.environment:
         print(f"{e}={os.environ.get(e)}", flush=True)
 
+    print("Input:", flush=True)
     while True:
         print(sys.stdin.readline(), end="", flush=True)
 

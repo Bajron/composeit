@@ -480,12 +480,12 @@ def test_restarting(process_cleaner):
         # Logs should stop as well because of server disconnection
         logs.join()
 
-        assert is_sequence(logs.get_service("always"))
+        assert is_sequence(logs.get_service_ints("always"))
         for quick4 in ["not_restarting", "one_shot", "one_time", "one_try", "one_run"]:
-            assert [0, 1, 2, 3] == logs.get_service(quick4), f"Not matching for {quick4}"
+            assert [0, 1, 2, 3] == logs.get_service_ints(quick4), f"Not matching for {quick4}"
 
         # First run plus 3 restart attempts
-        assert [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2] == logs.get_service("fail_restart")
+        assert [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2] == logs.get_service_ints("fail_restart")
 
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)

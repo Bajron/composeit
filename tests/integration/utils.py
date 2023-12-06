@@ -120,8 +120,11 @@ class LogsGatherer:
         self.reading_thread = threading.Thread(target=self.read_filtered, args=(services,))
         self.reading_thread.start()
 
-    def get_service(self, service):
+    def get_service_ints(self, service):
         return list(map(lambda x: int(x[1]), filter(lambda x: x[0] == service, self.log_out)))
+
+    def get_service(self, service):
+        return list(x[1] for x in filter(lambda x: x[0] == service, self.log_out))
 
     def read_filtered(self, services):
         self.log_out = []

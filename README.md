@@ -36,6 +36,11 @@ Run tests
 pytest
 ```
 
+Skip integration tests
+```
+pytest --ignore=tests/integration
+```
+
 ## Manual test
 
 In one window

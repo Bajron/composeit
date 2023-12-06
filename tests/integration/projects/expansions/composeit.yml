@@ -63,3 +63,4 @@ services:
       - FROM_ENV_OVERRIDEN='zzz'
       - COPIED_FROM_ENV="copy ${FROM_ENV}"
       - VERBATIM_FROM_ENV="verbatim $${FROM_ENV}"
+      - FROM_ENV_SAVED

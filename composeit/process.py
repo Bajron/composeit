@@ -209,7 +209,8 @@ class AsyncProcess:
 
                 def make(e):
                     try:
-                        return dotenv.dotenv_values(stream=io.StringIO(e))
+                        # Strings are already interpolated during resolve phase
+                        return dotenv.dotenv_values(stream=io.StringIO(e), interpolate=False)
                     except Exception as ex:
                         self.log.warning(f"Error parsing environment element ({e}): {ex}")
                         return {}
