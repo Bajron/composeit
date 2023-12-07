@@ -1,0 +1,10 @@
+services:
+  leaf:
+    build:
+      shell_sequence:
+      - echo foo > message.tmp
+    shell: true
+    command: python ../../echo.py < message.tmp
+    clean:
+      shell_sequence:
+      - python -c "import os; os.unlink('message.tmp')"

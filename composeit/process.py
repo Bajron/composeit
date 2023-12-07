@@ -443,6 +443,7 @@ class AsyncProcess:
         # NOTE: this one should not be supressed by logging: none
         stream_mode = asyncio.subprocess.PIPE
 
+        self.log.debug(f"Executing {cmd}")
         if isinstance(cmd, list):
             process = await asyncio.create_subprocess_exec(
                 *cmd, stdin=asyncio.subprocess.PIPE, stderr=stream_mode, stdout=stream_mode
@@ -550,8 +551,12 @@ class AsyncProcess:
 
         for child in children:
             if child.is_running():
-                self.log.warning(f"Terminating leftover child process {child}")
-                child.terminate()
+                try:
+                    self.log.warning(f"Terminating leftover child process {child}")
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    # Well ok, maybe we are too late
+                    pass
 
     def terminate(self):
         self.log.debug(f"Terminating, rc:{self.rc}, process:{self.process}")
