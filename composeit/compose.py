@@ -679,7 +679,7 @@ class Compose:
         )
 
         asyncio.get_event_loop().create_task(
-            run_server(self.app, self.project_name, self.communication_pipe)
+            run_server(self.app, self.logger.getChild("http"), self.communication_pipe)
         )
 
     def shutdown(self, request_clean=False):
@@ -823,13 +823,9 @@ class UniqueKeyLoader(yaml.SafeLoader):
 from aiohttp.web import cast, Application, AppRunner, AccessLogger, NamedPipeSite, UnixSite
 
 
-async def run_server(app: Application, project_name: str, path: str, delete_pipe=True):
+async def run_server(app: Application, logger: logging.Logger, path: str, delete_pipe=True):
     # Adapted from aiohttp.web._run_app
     try:
-        logger = logging.getLogger(f"{project_name}.http")
-        logger.setLevel(logging.DEBUG)
-        logger.debug(f"Creating server {path}")
-
         if asyncio.iscoroutine(app):
             app = await app  # type: ignore[misc]
 

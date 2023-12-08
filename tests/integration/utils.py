@@ -7,6 +7,7 @@ import io
 import re
 import os
 import threading
+import locale
 from typing import List
 
 tests_directory = pathlib.Path(__file__).parent
@@ -133,12 +134,19 @@ class LogsGatherer:
         self.log_out = []
         services = "|".join(services)
         log_line = re.compile(f"^(?P<service>{services}):\\s+(?P<log>.*)$")
+        encoding = locale.getpreferredencoding(False)
         self.log_on.release()
-        for l in [l.decode().strip() for l in self.log_all.stdout.readlines()]:
+        for l in [
+            l.decode(encoding, errors="replace").strip() for l in self.log_all.stdout.readlines()
+        ]:
             m = log_line.match(l)
             if not m:
                 continue
             self.log_out.append((m["service"], m["log"].strip()))
+
+    def stop(self):
+        kill_deepest_child(self.log_all.pid)
+        self.join()
 
     def join(self):
         self.reading_thread.join()

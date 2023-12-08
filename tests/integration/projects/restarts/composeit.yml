@@ -16,7 +16,7 @@ services:
     restart: on-failure
     restart_policy:
       max_attempts: 3
-      delay: 60
+      delay: 5
 
   not_restarting:
     command: [python, ../../counter.py, --time, 0.01, --exit, 3, --return-code, 0]

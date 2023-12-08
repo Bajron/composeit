@@ -35,8 +35,10 @@ def main():
         print(f"{e}={os.environ.get(e)}", flush=True)
 
     print("Input:", flush=True)
-    while True:
-        print(sys.stdin.readline(), end="", flush=True)
+    line = sys.stdin.readline()
+    while line:
+        print(line, end="", flush=True)
+        line = sys.stdin.readline()
 
 
 if __name__ == "__main__":

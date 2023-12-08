@@ -1,10 +1,24 @@
 services:
   leaf:
+    depends_on: middle
     build:
       shell_sequence:
-      - echo foo > message.tmp
+      - echo foo > message_leaf.tmp
     shell: true
-    command: python ../../echo.py < message.tmp
+    command: python ../../echo.py < message_leaf.tmp
     clean:
       shell_sequence:
-      - python -c "import os; os.unlink('message.tmp')"
+      - python -c "import os; os.unlink('message_leaf.tmp')"
+
+  middle:
+    depends_on: root
+    command: [python, ../../counter.py, --time, 2]
+
+  root:
+    build:
+      shell_sequence:
+      - echo bar > message_root.tmp
+    command: [python, ../../counter.py, --time, 2]
+    clean:
+      shell_sequence:
+      - python -c "import os; os.unlink('message_root.tmp')"

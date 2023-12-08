@@ -8,7 +8,7 @@ def test_restarting(process_cleaner):
 
     try:
         up = subprocess.Popen(
-            ["composeit", "up", "one_shot"], cwd=service_directory, stdout=subprocess.PIPE
+            ["composeit", "--verbose", "up", "one_shot"], cwd=service_directory, stdout=subprocess.PIPE
         )
         process_cleaner.append(up)
 
@@ -27,7 +27,7 @@ def test_restarting(process_cleaner):
         subprocess.call(["composeit", "start"], cwd=service_directory)
 
         for _ in range(20):
-            states = ps(service_directory, services="fail_restart")
+            states = ps(service_directory, services=["fail_restart"])
             if states and states["fail_restart"] == "exited":
                 break
             time.sleep(0.3)
@@ -44,6 +44,16 @@ def test_restarting(process_cleaner):
         assert states["one_try"] == "exited"
         assert states["one_run"] == "exited"
 
+        # Verifying that "always" and "on-failure" can be stopped
+        subprocess.call(["composeit", "stop", "always", "restarting"], cwd=service_directory)
+        for _ in range(20):
+            states = ps(service_directory, services=["always", "restarting"])
+            if states and all(v == "exited" for v in states.values()):
+                break
+            time.sleep(0.1)
+        assert states["always"] == "exited"
+        assert states["restarting"] == "exited"
+
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)
 
@@ -54,6 +64,7 @@ def test_restarting(process_cleaner):
         for quick4 in ["not_restarting", "one_shot", "one_time", "one_try", "one_run"]:
             assert [0, 1, 2, 3] == logs.get_service_ints(quick4), f"Not matching for {quick4}"
 
+        # TODO: sometimes there is more here... that is why this one goes with --verbose
         # First run plus 2 restart attempts
         assert [0, 1, 2, 0, 1, 2, 0, 1, 2] == logs.get_service_ints("fail_restart")
 

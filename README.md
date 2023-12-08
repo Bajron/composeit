@@ -119,6 +119,7 @@ docker-compose
 - cap add/drop, could be done on Linux I guess, but would require root
 - build as dependecy/prepare operation
   (new configuration fields, as dockerfile or context might not have sense)
+- new config loading into running daemon
 
 options:
 - project-name

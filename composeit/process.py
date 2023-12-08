@@ -2,6 +2,7 @@ import logging
 import asyncio
 import psutil
 import os
+import locale
 import sys
 import subprocess
 import time
@@ -10,8 +11,7 @@ import io
 from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
 
-import traceback
-from typing import List
+from typing import List, Optional
 
 
 def make_colored(color):
@@ -39,48 +39,49 @@ class AsyncProcess:
         execute_build: bool = False,
         execute_clean: bool = False,
     ):
-        self.sequence = sequence
-        self.name = name
-        self.service_config = service_config
+        self.sequence: int = sequence
+        self.name: str = name
+        self.service_config: dict = service_config
 
-        self.execute = execute
-        self.execute_build = execute_build
-        self.execute_clean = execute_clean
+        self.execute: bool = execute
+        self.execute_build: bool = execute_build
+        self.execute_clean: bool = execute_clean
 
         self.build_time = None
 
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
         self.process: asyncio.subprocess.Process = None
-        self.command = self._get_command()
+        self.command: List[str] = self._get_command()
         self.start_time = None
         self.stop_time = None
         self.watch_coro = None
         self.sleep_task = None
 
-        self.restart_policy = service_config.get("restart", "no")
-        # YAML translates no to False
-        if self.restart_policy == False:
-            self.restart_policy = "no"
+        self.preferred_encoding = locale.getpreferredencoding(False)
+
+        # NOTE: YAML translates `no` to False
+        self.restart_policy = service_config.get("restart", "no") or "no"
         assert (
             self.restart_policy in RestartPolicyOptions
         ), f"restart value must be in {RestartPolicyOptions}, recieved {self.restart_policy}"
 
-        self.restart_policy_config = {
+        self.restart_policy_config: dict = {
             "delay": 5,
             "max_attempts": "infinite",
             "window": 0,
         }
         self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
-        self.color = color
+        self.color: str = color
 
-        self.lout = logging.getLogger(f"{self.name}:")
-        self.lerr = logging.getLogger(f"{self.name}>")
-        self.log = logging.getLogger(f"{self.name}")
+        self.lout: logging.Logger = logging.getLogger(f"{self.name}:")
+        self.lerr: logging.Logger = logging.getLogger(f"{self.name}>")
+        # NOTE: avoid simply `name` because of side effects with "root" that returns the root logger
+        self.log: logging.Logger = logging.getLogger(f"*{self.name}*")
 
         logHandler = logging.StreamHandler(stream=sys.stderr)
-        logHandler.setFormatter(logging.Formatter(" **%(name)s** %(message)s"))
+        logHandler.setFormatter(logging.Formatter(" *%(name)s* %(message)s"))
         self.log.addHandler(logHandler)
         self.log.setLevel(logging.INFO)
         self.log.propagate = False
@@ -94,12 +95,12 @@ class AsyncProcess:
         self.lerr.addHandler(streamHandler)
         self.lerr.propagate = False
 
-        self.popen_kw = {}
+        self.popen_kw: dict = {}
 
-        self.rc = None
-        self.restarting = False
-        self.terminated = False
-        self.stopped = True
+        self.rc: Optional[int] = None
+        self.restarting: bool = False
+        self.terminated: bool = False
+        self.stopped: bool = True
         self.exception = None
 
     def get_output_formatter(self):
@@ -250,6 +251,8 @@ class AsyncProcess:
         # else: # TODO: not sure yet if required on Linux, could be helpful for closing children
         #     popen_kw.update(start_new_session=True)
 
+        self.preferred_encoding = locale.getpreferredencoding(False)
+
         self.command = self._get_command()
         if service_config.get("shell", False):
             process = await asyncio.create_subprocess_shell(
@@ -295,7 +298,10 @@ class AsyncProcess:
                 self.log.warning(f"Cannot decode stdout line: {ex}")
 
     def _handle_output_line(self, l: bytes):
-        decoded_line = l.decode(errors="replace").rstrip("\r\n")
+        decoded_line = l.decode(encoding=self.preferred_encoding, errors="replace").rstrip("\r\n")
+        # In case output is not capable of unicode
+        decoded_line = decoded_line.replace("\ufffd", "?")
+        # No terminal shenanigans
         ascii_escaped = decoded_line.replace("\u001b", "\\u001b")
         return ascii_escaped
 
@@ -318,7 +324,7 @@ class AsyncProcess:
 
             if self.restart_policy in ["always", "unless-stopped"] and not self.stopped:
                 restarted = await self._restart_process()
-            elif self.restart_policy == "on-failure" and self.rc != 0:
+            elif self.restart_policy == "on-failure" and self.rc != 0 and not self.stopped:
                 restarted = await self._restart_process()
             else:
                 return False
@@ -357,7 +363,7 @@ class AsyncProcess:
             await self.startup_semaphore.acquire()
             # While waiting for start, one can call build() or terminate()
             if self.terminated or not self.execute:
-                return
+                break
 
             await self.resolve_build()
 
@@ -464,9 +470,9 @@ class AsyncProcess:
         await asyncio.gather(self.watch_stderr(process), self.watch_stdout(process))
         return await process.wait()
 
-    def start(self, request_build=None):
+    def start(self, request_build: Optional[bool] = None):
         if self.stopped:
-            if request_build != None:
+            if request_build is not None:
                 self.execute_build = request_build
 
             self.log.debug("Starting")
@@ -502,7 +508,7 @@ class AsyncProcess:
         await self._sleep(duration_to_seconds(sleep_time))
 
         # Check after a long sleep
-        if self.terminated:
+        if self.terminated or self.stopped:
             return False
 
         await self._start_process()
@@ -517,15 +523,16 @@ class AsyncProcess:
         self.process = await self.process_initialization
         self._make_watch_coro()
 
-    async def stop(self, request_clean=None):
-        if request_clean != None:
-            self.request_clean = request_clean
+    async def stop(self, request_clean: Optional[bool] = None):
+        if request_clean is not None:
+            self.execute_clean = request_clean
 
-        if self.stopped and self.request_clean:
+        if self.stopped and self.execute_clean:
             await self.resolve_clean()
 
         self.log.debug("Stopping")
         self.stopped = True
+        self._cancel_sleep()
         if self.rc is None and self.process is not None:
             self.log.debug("Sending terminate signal for stop")
             self._terminate()
