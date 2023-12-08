@@ -46,6 +46,7 @@ def process_cleaner():
         # https://stackoverflow.com/questions/74312272/how-can-i-fail-tests-in-a-teardown-fixture-properly-in-pytest
         # Failing the test would be good...
 
+        print("process_cleaner: Terminating", process)
         process.terminate()
 
         for _ in range(10):
@@ -59,6 +60,7 @@ def process_cleaner():
 
         for child in children:
             if child.is_running():
+                print("process_cleaner: Terminating", child)
                 child.terminate()
 
         pytest.fail("Process alive on teardown", process.args)

@@ -180,6 +180,12 @@ def test_logs_on_side(process_cleaner):
         rc = up.wait(5)
         assert rc is not None
 
+        log_all.wait(5)
+        log_1.wait(5)
+        log_2.wait(5)
+        attach_for_log.wait(5)
+
+
 
 def test_start_by_pointed_file(process_cleaner):
     try:
@@ -361,15 +367,19 @@ def test_attach(process_cleaner):
         process_cleaner.append(attach)
 
         log_out = None
-
+        go_logs = threading.Semaphore(0)
         def read3():
             nonlocal log_out
-            log_out = [log.stdout.readline().decode().strip() for _ in range(3)]
+            log_out = []
+            go_logs.release()
+            for _ in range(3):
+                log_out.append(log.stdout.readline().decode().strip())
 
         t = threading.Thread(target=read3)
         t.start()
 
         words = ["spam", "ham", "eggs"]
+        go_logs.acquire()
         for word in words:
             attach.stdin.write(f"{word}\n".encode())
             attach.stdin.flush()
@@ -383,6 +393,11 @@ def test_attach(process_cleaner):
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)
         assert rc is not None
+        rc = attach.wait(5)
+        assert rc is not None
+        rc = log.wait(5)
+        assert rc is not None
+
 
 
 def test_dependencies(process_cleaner):
