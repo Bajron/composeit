@@ -33,19 +33,6 @@ def main():
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--no-color", default=False, action="store_true")
 
-    parser.add_argument(
-        "--test-server",
-        default=None,
-        metavar="<PATH>",
-        help="Temporary option to perform GET with a provided URL on the server",
-    )
-    parser.add_argument(
-        "--test-server-post",
-        default=None,
-        metavar="<PATH>",
-        help="Temporary option to perform POST with a provided URL on the server",
-    )
-
     subparsers = parser.add_subparsers(dest="command", help="sub-command help")
     parser_up = subparsers.add_parser("up", help="Startup the services")
     parser_up.add_argument("--build", default=False, action="store_true", help="Rebuild services")
@@ -82,8 +69,10 @@ def main():
     parser_attach.add_argument("service", nargs=1, help="Specific service to attach to")
 
     parser_ps = subparsers.add_parser("ps", help="Show services state")
+    parser_ps.add_argument("service", nargs="*", help="Specific services to show")
 
     parser_top = subparsers.add_parser("top", help="Show processes")
+    parser_top.add_argument("service", nargs="*", help="Specific services to show processes from")
 
     parser_config = subparsers.add_parser("config", help="Show services config")
 
@@ -156,13 +145,7 @@ def main():
             defer_config_load=defer_config_load,
         )
 
-        if options.test_server is not None:
-            compose.test_server(options.test_server, "GET")
-            return 0
-        elif options.test_server_post is not None:
-            compose.test_server(options.test_server_post, "POST")
-            return 0
-        elif hasattr(options, "command") and options.command is not None:
+        if hasattr(options, "command") and options.command is not None:
             services = None
             if hasattr(options, "service") and len(options.service) > 0:
                 services = options.service
@@ -187,9 +170,9 @@ def main():
             elif options.command == "config":
                 return pprint.pprint(compose.service_config)
             elif options.command == "ps":
-                return asyncio.run(compose.ps())
+                return asyncio.run(compose.ps(services))
             elif options.command == "top":
-                return asyncio.run(compose.top())
+                return asyncio.run(compose.top(services))
             else:
                 cfg_log.error(f"Unhandled option {options.command}")
                 return 10

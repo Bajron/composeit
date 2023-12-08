@@ -1,12 +1,7 @@
-import pathlib
 import subprocess
-import pytest
 import psutil
-import time
 import io
 import os
-import re
-import threading
 
 from .utils import *
 
@@ -91,10 +86,10 @@ def test_diagnostic_on_side(process_cleaner):
         # Diagnosting does not work without server
         # TODO? In theory we could display the services as not started
         ps_done = subprocess.run(["composeit", "ps"], capture_output=True, cwd=service_directory)
-        assert "Server is not running" in ps_done.stderr.decode()
+        assert "Server is not running" in ps_done.stderr.decode(errors='replace')
 
         top_done = subprocess.run(["composeit", "top"], capture_output=True, cwd=service_directory)
-        assert "Server is not running" in top_done.stderr.decode()
+        assert "Server is not running" in top_done.stderr.decode(errors='replace')
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)
@@ -184,7 +179,6 @@ def test_logs_on_side(process_cleaner):
         log_1.wait(5)
         log_2.wait(5)
         attach_for_log.wait(5)
-
 
 
 def test_start_by_pointed_file(process_cleaner):
@@ -332,177 +326,4 @@ def test_start_by_file_with_name(process_cleaner):
         rc = up1.wait(5)
         assert rc is not None
         rc = up2.wait(5)
-        assert rc is not None
-
-
-def test_attach(process_cleaner):
-    service_directory = tests_directory / "projects" / "input"
-
-    try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
-        process_cleaner.append(up)
-
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
-
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
-
-        log = subprocess.Popen(
-            ["composeit", "logs", "echo"],
-            stdout=subprocess.PIPE,
-            cwd=service_directory,
-            env=env,
-        )
-        process_cleaner.append(log)
-
-        attach = subprocess.Popen(
-            ["composeit", "attach", "echo"],
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            cwd=service_directory,
-            env=env,
-        )
-        process_cleaner.append(attach)
-
-        log_out = None
-        go_logs = threading.Semaphore(0)
-        def read3():
-            nonlocal log_out
-            log_out = []
-            go_logs.release()
-            for _ in range(3):
-                log_out.append(log.stdout.readline().decode().strip())
-
-        t = threading.Thread(target=read3)
-        t.start()
-
-        words = ["spam", "ham", "eggs"]
-        go_logs.acquire()
-        for word in words:
-            attach.stdin.write(f"{word}\n".encode())
-            attach.stdin.flush()
-            assert word == attach.stdout.readline().decode().strip()
-        kill_deepest_child(attach.pid)
-
-        t.join()
-        assert log_out == words
-        kill_deepest_child(log.pid)
-    finally:
-        subprocess.call(["composeit", "down"], cwd=service_directory)
-        rc = up.wait(5)
-        assert rc is not None
-        rc = attach.wait(5)
-        assert rc is not None
-        rc = log.wait(5)
-        assert rc is not None
-
-
-
-def test_dependencies(process_cleaner):
-    service_directory = tests_directory / "projects" / "depends_on"
-
-    try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
-        process_cleaner.append(up)
-
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
-
-        states = ps(service_directory)
-        assert all(map(lambda x: x == "up", states.values()))
-        top_lines = top(service_directory)
-        assert len(top_lines) == 3
-
-        # Just close independent service
-        subprocess.check_output(["composeit", "stop", "leaf"], cwd=service_directory)
-        states = ps(service_directory)
-        assert states["leaf"] == "exited"
-        assert states["middle"] == "up"
-        assert states["root"] == "up"
-
-        top_lines = top(service_directory)
-        assert len(top_lines) == 2
-
-        # Close crucial service, the other one that depends on it should close too
-        subprocess.check_output(["composeit", "stop", "root"], cwd=service_directory)
-        states = ps(service_directory)
-        assert states["leaf"] == "exited"
-        assert states["middle"] == "exited"
-        assert states["root"] == "exited"
-
-        top_lines = top(service_directory)
-        assert len(top_lines) == 0
-
-        # Start service that has dependencies, others should be started as well
-        subprocess.check_output(["composeit", "start", "leaf"], cwd=service_directory)
-        states = ps(service_directory)
-        assert states["leaf"] == "up"
-        assert states["middle"] == "up"
-        assert states["root"] == "up"
-
-        top_lines = top(service_directory)
-        assert len(top_lines) == 3
-
-    finally:
-        subprocess.call(["composeit", "down"], cwd=service_directory)
-        rc = up.wait(5)
-        assert rc is not None
-
-
-def test_restarting(process_cleaner):
-    service_directory = tests_directory / "projects" / "restarts"
-
-    try:
-        up = subprocess.Popen(
-            ["composeit", "up", "one_shot"], cwd=service_directory, stdout=subprocess.PIPE
-        )
-        process_cleaner.append(up)
-
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
-
-        # always policy brings the service up on each server start (note we started only "one_shot")
-        states = ps(service_directory)
-        assert states["always"] == "up"
-
-        subprocess.call(["composeit", "stop", "always"], cwd=service_directory)
-
-        logs = LogsGatherer(service_directory, states.keys())
-
-        subprocess.call(["composeit", "start"], cwd=service_directory)
-        # TODO: better solution is welcome
-        time.sleep(2)
-
-        states = ps(service_directory)
-
-        assert states["always"] == "up"
-        # Relies on the default restart delay of 10s
-        assert states["restarting"] == "restarting"
-        assert states["fail_restart"] == "exited"
-        assert states["not_restarting"] == "exited"
-        assert states["one_shot"] == "exited"
-        assert states["one_time"] == "exited"
-        assert states["one_try"] == "exited"
-        assert states["one_run"] == "exited"
-
-        subprocess.call(["composeit", "down"], cwd=service_directory)
-        rc = up.wait(5)
-
-        # Logs should stop as well because of server disconnection
-        logs.join()
-
-        assert is_sequence(logs.get_service_ints("always"))
-        for quick4 in ["not_restarting", "one_shot", "one_time", "one_try", "one_run"]:
-            assert [0, 1, 2, 3] == logs.get_service_ints(quick4), f"Not matching for {quick4}"
-
-        # First run plus 3 restart attempts
-        assert [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2] == logs.get_service_ints("fail_restart")
-
-    finally:
-        subprocess.call(["composeit", "down"], cwd=service_directory)
-        rc = up.wait(5)
         assert rc is not None

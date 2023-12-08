@@ -73,10 +73,10 @@ def ps_split_to_state(split):
     return None
 
 
-def ps(service_directory, *args):
+def ps(service_directory, *args, services=None):
     header_lines = 2
     ps_output = subprocess.check_output(
-        ["composeit", *[str(a) for a in args], "ps"], cwd=service_directory
+        ["composeit", *[str(a) for a in args], "ps", *(services or [])], cwd=service_directory
     )
     ps_lines = [l.decode().strip() for l in io.BytesIO(ps_output).readlines()]
     if (
@@ -84,7 +84,7 @@ def ps(service_directory, *args):
         or not ps_lines[0].startswith("Project")
         or not ps_lines[1].startswith("NAME")
     ):
-        # Bad call, not even receiveing a header
+        # Bad call, not even receiving a header
         return None
     states = {sp[0]: ps_split_to_state(sp) for sp in [ps.split() for ps in ps_lines[header_lines:]]}
     return states
@@ -118,6 +118,7 @@ class LogsGatherer:
             env=env,
         )
         self.log_out = None
+        self.log_on = threading.Semaphore(0)
 
         self.reading_thread = threading.Thread(target=self.read_filtered, args=(services,))
         self.reading_thread.start()
@@ -132,6 +133,7 @@ class LogsGatherer:
         self.log_out = []
         services = "|".join(services)
         log_line = re.compile(f"^(?P<service>{services}):\\s+(?P<log>.*)$")
+        self.log_on.release()
         for l in [l.decode().strip() for l in self.log_all.stdout.readlines()]:
             m = log_line.match(l)
             if not m:
