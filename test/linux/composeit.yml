@@ -31,3 +31,10 @@ services:
     command: ping -c 4 127.0.0.4
     shell: true
     restart: always
+
+  grep_service:
+    command: [grep, --color, service, composeit.yml]
+
+  color_service:
+    command: printf "\e[31mHello\e[0m World"
+    shell: true

@@ -281,7 +281,7 @@ class AsyncProcess:
             return
         async for l in process.stderr:
             try:
-                self.lerr.info(l.decode(errors="ignore").rstrip("\r\n"))
+                self.lerr.info(self._handle_output_line(l))
             except UnicodeDecodeError as ex:
                 self.log.warning(f"Cannot decode stderr line: {ex}")
 
@@ -290,9 +290,14 @@ class AsyncProcess:
             return
         async for l in process.stdout:
             try:
-                self.lout.info(l.decode(errors="ignore").rstrip("\r\n"))
+                self.lout.info(self._handle_output_line(l))
             except UnicodeDecodeError as ex:
                 self.log.warning(f"Cannot decode stdout line: {ex}")
+
+    def _handle_output_line(self, l: bytes):
+        decoded_line = l.decode(errors="replace").rstrip("\r\n")
+        ascii_escaped = decoded_line.replace("\u001b", "\\u001b")
+        return ascii_escaped
 
     async def wait_for_code(self):
         self.rc = await self.process.wait()
