@@ -10,6 +10,7 @@ import dotenv
 import io
 from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
+from .log_utils import LogKeeper
 
 from typing import List, Optional, Union, Dict, Any
 
@@ -84,9 +85,14 @@ class AsyncProcess:
         self.lerr: logging.LoggerAdapter = self._adapt_logger(self._lerr)
         self.log: logging.LoggerAdapter = self._adapt_logger(self._log)
 
+        self.lout_keeper = LogKeeper()
+        self.lerr_keeper = LogKeeper()
+        self.log_keeper = LogKeeper()
+
         logHandler = logging.StreamHandler(stream=sys.stderr)
         logHandler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
         self._log.addHandler(logHandler)
+        self._log.addHandler(self.log_keeper)
         self._log.setLevel(logging.INFO)
         self._log.propagate = False
 
@@ -94,9 +100,11 @@ class AsyncProcess:
         streamHandler.setFormatter(self.get_output_formatter())
         self._lout.setLevel(logging.INFO)
         self._lout.addHandler(streamHandler)
+        self._lout.addHandler(self.lout_keeper)
         self._lout.propagate = False
         self._lerr.setLevel(logging.INFO)
         self._lerr.addHandler(streamHandler)
+        self._lerr.addHandler(self.lerr_keeper)
         self._lerr.propagate = False
 
         self.popen_kw: dict = {}
@@ -158,7 +166,13 @@ class AsyncProcess:
         else:
             return "started"
 
-    def attach_log_handler(self, handler: logging.StreamHandler):
+    def attach_log_handler(self, handler: logging.StreamHandler, provide_context: bool = False):
+        if provide_context:
+            c = self.lerr_keeper.window + self.lout_keeper.window + self.log_keeper.window
+            c.sort(key=lambda x: x.created)
+            for r in c:
+                handler.emit(r)
+
         self.log.debug(f"Logger attached {handler}")
         self._log.addHandler(handler)
         self._lout.addHandler(handler)

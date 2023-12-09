@@ -228,15 +228,15 @@ class Compose:
 
         return run_client_commands
 
-    async def logs(self, services=None):
+    async def logs(self, services: Optional[List[str]] = None, context: bool = False):
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_logs_session(services))
+            await self.run_client_session(self.make_logs_session(services, context))
         else:
             self.logger.error("Server is not running")
 
-    def make_logs_session(self, services=None):
+    def make_logs_session(self, services: Optional[List[str]] = None, context: bool = False):
         async def stream_logs_response(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 data = await response.json()
@@ -245,14 +245,14 @@ class Compose:
             single_service_provided = services is not None and len(services) == 1
 
             def logs_request():
-                params = [("format", "json")]
+                params = [("format", "json"), ("context", "on" if context else "no")]
                 if single_service_provided:
                     service = services[0]
-                    return session.get(f"/{project}/{service}/logs", params=params)
+                    return session.get(f"/{project}/{service}/logs", params=params, timeout=0,)
                 else:
                     if services:
                         params += [("service", s) for s in services]
-                    return session.get(f"/{project}/logs", params=params)
+                    return session.get(f"/{project}/logs", params=params, timeout=0,)
 
             async with logs_request() as response:
                 close_requested = False
@@ -276,6 +276,8 @@ class Compose:
                     self.logger.debug("Reading logs")
                     async for line in response.content:
                         fields = json.loads(line.decode())
+                        if not self.verbose and fields["levelno"] == logging.DEBUG:
+                            continue
                         print_function(fields)
                 except asyncio.CancelledError:
                     self.logger.debug("Request cancelled")
@@ -285,22 +287,24 @@ class Compose:
 
         return stream_logs_response
 
-    async def attach(self, service):
+    async def attach(self, service:str, context: bool = False):
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_attach_session(service))
+            await self.run_client_session(self.make_attach_session(service, context))
         else:
             self.logger.error("Server is not running")
 
-    def make_attach_session(self, service):
+    def make_attach_session(self, service: str, context: bool = False):
         async def client_session(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 data = await response.json()
                 project = data["project_name"]
 
             async with session.ws_connect(
-                f"/{project}/{service}/attach", params={"format": "json"}
+                f"/{project}/{service}/attach",
+                params={"format": "json", "context": "on" if context else "no"},
+                timeout=0,
             ) as ws:
                 exit_requested = False
 
@@ -316,6 +320,8 @@ class Compose:
                         try:
                             line = await ws.receive_str()
                             fields = json.loads(line)
+                            if not self.verbose and fields["levelno"] == logging.DEBUG:
+                                continue
                             print_message(fields)
                         except TypeError:
                             if not exit_requested:
@@ -557,6 +563,7 @@ class Compose:
         service = self._get_service(request)
 
         response_format = request.query.get("format", "text")
+        add_context: bool = request.query.get("context", "no") == "on"
 
         # https://docs.aiohttp.org/en/stable/web_lowlevel.html
         response = web.WebSocketResponse()
@@ -565,7 +572,7 @@ class Compose:
         logs_to_response = logging.StreamHandler(back_stream)
         if response_format == "json":
             logs_to_response.setFormatter(JsonFormatter("%(message)s"))
-        self.services[service].attach_log_handler(logs_to_response)
+        self.services[service].attach_log_handler(logs_to_response, add_context)
 
         def detach_logger(fut):
             self.logger.debug(f"Detaching log sender from {service}")
@@ -604,14 +611,15 @@ class Compose:
         response = web.StreamResponse()
         response.enable_chunked_encoding()
 
-        response_format = request.query.get("format", "text")
+        response_format: str = request.query.get("format", "text")
+        add_context: bool = request.query.get("context", "no") == "on"
 
         process = self.services[service]
         back_stream = ResponseAdapter(response)
         logs_to_response = logging.StreamHandler(back_stream)
         if response_format == "json":
             logs_to_response.setFormatter(JsonFormatter("%(message)s"))
-        process.attach_log_handler(logs_to_response)
+        process.attach_log_handler(logs_to_response, add_context)
 
         def detach_logger(fut):
             self.logger.debug("Detaching log sender from service")
@@ -637,11 +645,12 @@ class Compose:
     async def get_services_logs(self, request: web.Request):
         self._get_project(request)
 
-        services = request.query.getall("service", None)
+        services: Optional[List[str]] = request.query.getall("service", None)
         if services is None:
             services = list(self.services.keys())
 
-        response_format = request.query.get("format", "text")
+        response_format: str = request.query.get("format", "text")
+        add_context: bool = request.query.get("context", "no") == "on"
 
         response = web.StreamResponse()
         response.enable_chunked_encoding()
@@ -653,7 +662,7 @@ class Compose:
 
         # TODO: provide some recent logs buffer
         for s in services:
-            self.services[s].attach_log_handler(logs_to_response)
+            self.services[s].attach_log_handler(logs_to_response, add_context)
 
         def detach_loggers(fut):
             for s in services:

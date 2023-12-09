@@ -64,9 +64,13 @@ def main():
 
     parser_logs = subparsers.add_parser("logs", help="Show logs from the services")
     parser_logs.add_argument("service", nargs="*", help="Specific services to show logs from")
+    parser_logs.add_argument("--with-context", default=False, action='store_true', help="Show previous logs context")
+    parser_logs.add_argument("--no-context", dest='with_context', action='store_false', help="Do not show previous logs context")
 
     parser_attach = subparsers.add_parser("attach", help="Attach to a service")
     parser_attach.add_argument("service", nargs=1, help="Specific service to attach to")
+    parser_attach.add_argument("--with-context", default=False, action='store_true', help="Show previous logs context")
+    parser_attach.add_argument("--no-context", dest='with_context', action='store_false', help="Do not show previous logs context")
 
     parser_ps = subparsers.add_parser("ps", help="Show services state")
     parser_ps.add_argument("service", nargs="*", help="Specific services to show")
@@ -168,9 +172,9 @@ def main():
             elif options.command == "stop":
                 return asyncio.run(compose.stop(services))
             elif options.command == "logs":
-                return asyncio.run(compose.logs(services))
+                return asyncio.run(compose.logs(services, options.with_context))
             elif options.command == "attach":
-                return asyncio.run(compose.attach(services[0]))
+                return asyncio.run(compose.attach(services[0], options.with_context))
             elif options.command == "config":
                 return pprint.pprint(compose.service_config)
             elif options.command == "ps":

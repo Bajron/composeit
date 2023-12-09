@@ -40,6 +40,7 @@ class JsonFormatter(logging.Formatter):
             record.asctime = self.formatTime(record, self.datefmt)
 
         json_object["name"] = record.name
+        json_object["levelno"] = record.levelno
         json_object["create_time"] = record.created
         json_object["message"] = self.formatMessage(record)
 
