@@ -10,7 +10,9 @@ def test_environment_expansions(process_cleaner):
 
         service_directory = tests_directory / "projects" / "expansions"
         up = subprocess.Popen(
-            ["composeit", "up", "--no-start"], cwd=service_directory, stdout=subprocess.PIPE
+            ["composeit", "up", "--no-start"],
+            cwd=service_directory,
+            stdout=subprocess.PIPE,
         )
         process_cleaner.append(up)
         first_line = up.stdout.readline().decode()

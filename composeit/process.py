@@ -34,7 +34,7 @@ class AsyncProcess:
         sequence: int,
         name: str,
         service_config: dict,
-        color: str,
+        color: Optional[str],
         execute: bool = True,
         execute_build: bool = False,
         execute_clean: bool = False,
@@ -73,27 +73,31 @@ class AsyncProcess:
         }
         self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
-        self.color: str = color
+        self.color: Optional[str] = color
 
-        self.lout: logging.Logger = logging.getLogger(f"{self.name}:")
-        self.lerr: logging.Logger = logging.getLogger(f"{self.name}>")
+        self._lout: logging.Logger = logging.getLogger(f"{self.name}:")
+        self._lerr: logging.Logger = logging.getLogger(f"{self.name}>")
         # NOTE: avoid simply `name` because of side effects with "root" that returns the root logger
-        self.log: logging.Logger = logging.getLogger(f"*{self.name}*")
+        self._log: logging.Logger = logging.getLogger(f"{self.name}*")
+
+        self.lout: logging.LoggerAdapter = self._adapt_logger(self._lout)
+        self.lerr: logging.LoggerAdapter = self._adapt_logger(self._lerr)
+        self.log: logging.LoggerAdapter = self._adapt_logger(self._log)
 
         logHandler = logging.StreamHandler(stream=sys.stderr)
-        logHandler.setFormatter(logging.Formatter(" *%(name)s* %(message)s"))
-        self.log.addHandler(logHandler)
-        self.log.setLevel(logging.INFO)
-        self.log.propagate = False
+        logHandler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
+        self._log.addHandler(logHandler)
+        self._log.setLevel(logging.INFO)
+        self._log.propagate = False
 
         streamHandler = logging.StreamHandler(stream=sys.stdout)
         streamHandler.setFormatter(self.get_output_formatter())
-        self.lout.setLevel(logging.INFO)
-        self.lout.addHandler(streamHandler)
-        self.lout.propagate = False
-        self.lerr.setLevel(logging.INFO)
-        self.lerr.addHandler(streamHandler)
-        self.lerr.propagate = False
+        self._lout.setLevel(logging.INFO)
+        self._lout.addHandler(streamHandler)
+        self._lout.propagate = False
+        self._lerr.setLevel(logging.INFO)
+        self._lerr.addHandler(streamHandler)
+        self._lerr.propagate = False
 
         self.popen_kw: dict = {}
 
@@ -102,6 +106,12 @@ class AsyncProcess:
         self.terminated: bool = False
         self.stopped: bool = True
         self.exception = None
+
+    def _adapt_logger(self, logger: logging.Logger) -> logging.LoggerAdapter:
+        return logging.LoggerAdapter(
+            logger,
+            extra={"color": self.color},
+        )
 
     def get_output_formatter(self):
         color_wrap = make_colored(self.color) if self.color is not None else not_colored
@@ -150,15 +160,15 @@ class AsyncProcess:
 
     def attach_log_handler(self, handler: logging.StreamHandler):
         self.log.debug(f"Logger attached {handler}")
-        self.log.addHandler(handler)
-        self.lout.addHandler(handler)
-        self.lerr.addHandler(handler)
+        self._log.addHandler(handler)
+        self._lout.addHandler(handler)
+        self._lerr.addHandler(handler)
 
     def detach_log_handler(self, handler: logging.StreamHandler):
         self.log.debug(f"Logger detached {handler}")
-        self.log.removeHandler(handler)
-        self.lout.removeHandler(handler)
-        self.lerr.removeHandler(handler)
+        self._log.removeHandler(handler)
+        self._lout.removeHandler(handler)
+        self._lerr.removeHandler(handler)
 
     def _get_command(self) -> Union[str, List[str]]:
         config = self.service_config

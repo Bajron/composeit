@@ -86,7 +86,11 @@ def main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    use_color = not options.no_color
+    use_color = os.isatty(sys.stdout.fileno())
+    cfg_log.debug(f"Colors by default {use_color}")
+    # TODO: option to force color? the --ansi thing?
+    if options.no_color:
+        use_color = False
     if use_color and os.name == "nt":
         cfg_log.debug(f'Running `os.system("color")`')
         os.system("color")

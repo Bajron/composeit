@@ -1,4 +1,5 @@
 import yaml
+import json
 import asyncio
 import signal
 import os
@@ -15,6 +16,12 @@ from json.decoder import JSONDecodeError
 
 from typing import List, Dict, Optional
 
+from .log_utils import (
+    JsonFormatter,
+    print_message,
+    print_message_prefixed,
+    print_color_message_prefixed,
+)
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
@@ -46,6 +53,7 @@ class Compose:
     ) -> None:
         self.project_name: str = project_name
         self.working_directory: pathlib.Path = working_directory
+        self.create_time = time.time()
 
         self.verbose: bool = verbose
         self.logger: logging.Logger = logging.getLogger(project_name)
@@ -234,12 +242,16 @@ class Compose:
                 data = await response.json()
                 project = data["project_name"]
 
+            single_service_provided = services is not None and len(services) == 1
+
             def logs_request():
-                if services is not None and len(services) == 1:
+                params = [("format", "json")]
+                if single_service_provided:
                     service = services[0]
-                    return session.get(f"/{project}/{service}/logs")
+                    return session.get(f"/{project}/{service}/logs", params=params)
                 else:
-                    params = [("service", s) for s in services] if services else None
+                    if services:
+                        params += [("service", s) for s in services]
                     return session.get(f"/{project}/logs", params=params)
 
             async with logs_request() as response:
@@ -252,10 +264,19 @@ class Compose:
 
                 signal.signal(signal.SIGINT, signal_handler)
 
+                print_function = (
+                    print_message
+                    if single_service_provided
+                    else print_color_message_prefixed
+                    if self.use_colors
+                    else print_message_prefixed
+                )
+
                 try:
                     self.logger.debug("Reading logs")
                     async for line in response.content:
-                        print(line.decode(), end="")
+                        fields = json.loads(line.decode())
+                        print_function(fields)
                 except asyncio.CancelledError:
                     self.logger.debug("Request cancelled")
                 except aiohttp.ClientConnectionError as ex:
@@ -278,7 +299,9 @@ class Compose:
                 data = await response.json()
                 project = data["project_name"]
 
-            async with session.ws_connect(f"/{project}/{service}/attach") as ws:
+            async with session.ws_connect(
+                f"/{project}/{service}/attach", params={"format": "json"}
+            ) as ws:
                 exit_requested = False
 
                 def signal_handler(signal, frame):
@@ -292,7 +315,8 @@ class Compose:
                     while not ws.closed:
                         try:
                             line = await ws.receive_str()
-                            print(line, end="")
+                            fields = json.loads(line)
+                            print_message(fields)
                         except TypeError:
                             if not exit_requested:
                                 self.logger.warning("Connection broken")
@@ -465,6 +489,7 @@ class Compose:
             "project_name": self.project_name,
             "working_directory": str(self.working_directory),
             "service_files": [str(f) for f in self.service_files],
+            "create_time": self.create_time,
         }
 
     async def get_call(self, request):
@@ -531,11 +556,15 @@ class Compose:
         self._get_project(request)
         service = self._get_service(request)
 
+        response_format = request.query.get("format", "text")
+
         # https://docs.aiohttp.org/en/stable/web_lowlevel.html
         response = web.WebSocketResponse()
 
         back_stream = WebSocketAdapter(response)
         logs_to_response = logging.StreamHandler(back_stream)
+        if response_format == "json":
+            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
         self.services[service].attach_log_handler(logs_to_response)
 
         def detach_logger(fut):
@@ -575,9 +604,13 @@ class Compose:
         response = web.StreamResponse()
         response.enable_chunked_encoding()
 
+        response_format = request.query.get("format", "text")
+
         process = self.services[service]
         back_stream = ResponseAdapter(response)
         logs_to_response = logging.StreamHandler(back_stream)
+        if response_format == "json":
+            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
         process.attach_log_handler(logs_to_response)
 
         def detach_logger(fut):
@@ -608,15 +641,16 @@ class Compose:
         if services is None:
             services = list(self.services.keys())
 
+        response_format = request.query.get("format", "text")
+
         response = web.StreamResponse()
         response.enable_chunked_encoding()
 
         back_stream = ResponseAdapter(response)
         logs_to_response = logging.StreamHandler(back_stream)
-        # TODO: colors in formatter via name? otherwise separate stream handlers and formatters :/
-        # TODO: definitely need to organize loggers better
-        logs_to_response.setFormatter(logging.Formatter("%(name)s %(message)s"))
-        # TODO: structure here and format in the client
+        if response_format == "json":
+            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
+
         # TODO: provide some recent logs buffer
         for s in services:
             self.services[s].attach_log_handler(logs_to_response)
