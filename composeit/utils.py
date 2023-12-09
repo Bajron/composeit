@@ -74,7 +74,7 @@ def cumulative_time_text(seconds):
         return f"{round(seconds, 6)}"
 
 
-def resolve_string(s: str):
+def resolve_string(s: str) -> str:
     # NOTE: This is not fully compatible with https://docs.docker.com/compose/environment-variables/env-file/
     #       Required and alternative values are not handled. Single quote also a little different.
     #       We are working on that though B]
@@ -85,6 +85,7 @@ def resolve_string(s: str):
     #expand = dotenv.dotenv_values(stream=io.StringIO(f'X="{anti_variable}"'))["X"]
 
     expand = dotenv.main.resolve_variables([("H", f"{anti_variable}")], override=True)["H"]
+    assert expand is not None
     return expand.replace("<<dolar>>", "$")
 
     # TODO: single quotes

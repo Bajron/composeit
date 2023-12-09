@@ -37,41 +37,41 @@ class ColorAssigner:
 class Compose:
     def __init__(
         self,
-        project_name,
-        working_directory,
-        service_files,
-        verbose=False,
-        use_color=True,
-        defer_config_load=False,
+        project_name: str,
+        working_directory: pathlib.Path,
+        service_files: List[pathlib.Path],
+        verbose: bool = False,
+        use_color: bool = True,
+        defer_config_load: bool = False,
     ) -> None:
-        self.project_name = project_name
-        self.working_directory = working_directory
+        self.project_name: str = project_name
+        self.working_directory: pathlib.Path = working_directory
 
-        self.verbose = verbose
-        self.logger = logging.getLogger(project_name)
+        self.verbose: bool = verbose
+        self.logger: logging.Logger = logging.getLogger(project_name)
         if self.verbose:
             self.logger.setLevel(logging.DEBUG)
         else:
             # TODO: fix formatting
             self.logger.setLevel(logging.INFO)
 
-        self.communication_pipe = get_comm_pipe(working_directory, project_name)
+        self.communication_pipe: str = get_comm_pipe(working_directory, project_name)
         self.logger.debug(f"Communication pipe: {self.communication_pipe}")
 
-        self.use_colors = use_color
-        self.color_assigner = ColorAssigner()
+        self.use_colors: bool = use_color
+        self.color_assigner: ColorAssigner = ColorAssigner()
 
-        self.service_files = service_files
-        self.service_config = {"services": []}
+        self.service_files: List[pathlib.Path] = service_files
+        self.service_config: dict = {"services": []}
 
-        self.depending = None
-        self.depends = None
+        self.depending: Optional[Dict[str, List[str]]] = None
+        self.depends: Optional[Dict[str, List[str]]] = None
 
         if not defer_config_load:
             self.load_service_config()
 
         self.services: Dict[str, AsyncProcess] = {}
-        self.app = None
+        self.app: Optional[Application] = None
 
     def load_service_config(self):
         self._parse_service_config()
@@ -107,10 +107,12 @@ class Compose:
         self.depending = depending
         self.depends = depends
 
-    def get_start_sequence(self, services: List[str]):
+    def get_start_sequence(self, services: List[str]) -> List[str]:
+        assert self.depends is not None
         return topological_sequence(services, self.depends)
 
-    def get_stop_sequence(self, services: List[str]):
+    def get_stop_sequence(self, services: List[str]) -> List[str]:
+        assert self.depending is not None
         return topological_sequence(services, self.depending)
 
     async def build(self, services=None):
@@ -541,13 +543,20 @@ class Compose:
             self.services[service].detach_log_handler(logs_to_response)
 
         await response.prepare(request)
+
+        assert response.task is not None
         response.task.add_done_callback(detach_logger)
 
         try:
             while not response.closed and not self.services[service].terminated:
                 try:
                     line = await response.receive_str()
-                    self.services[service].process.stdin.write(line.encode())
+
+                    process = self.services[service].process
+                    if process is None or process.stdin is None:
+                        self.logger.warning("Cannot forward the input to the process")
+                        break
+                    process.stdin.write(line.encode())
                 except TypeError:
                     break
         finally:
@@ -576,6 +585,8 @@ class Compose:
             process.detach_log_handler(logs_to_response)
 
         await response.prepare(request)
+
+        assert response.task is not None
         response.task.add_done_callback(detach_logger)
 
         try:
@@ -616,6 +627,7 @@ class Compose:
                 self.services[s].detach_log_handler(logs_to_response)
 
         await response.prepare(request)
+        assert response.task is not None
         response.task.add_done_callback(detach_loggers)
 
         try:
@@ -821,7 +833,15 @@ class UniqueKeyLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep)
 
 
-from aiohttp.web import cast, Application, AppRunner, AccessLogger, NamedPipeSite, UnixSite
+from aiohttp.web import (
+    cast,
+    Application,
+    AppRunner,
+    AccessLogger,
+    NamedPipeSite,
+    UnixSite,
+    BaseSite,
+)
 
 
 async def run_server(app: Application, logger: logging.Logger, path: str, delete_pipe=True):
@@ -841,7 +861,7 @@ async def run_server(app: Application, logger: logging.Logger, path: str, delete
             keepalive_timeout=75,
         )
         await runner.setup()
-        sites = []
+        sites: List[BaseSite] = []
         if os.name == "nt":
             sites.append(NamedPipeSite(runner=runner, path=f"{path}"))
         else:
@@ -865,7 +885,7 @@ async def run_server(app: Application, logger: logging.Logger, path: str, delete
             os.unlink(f"{path}")
 
 
-def get_comm_pipe(directory_path: pathlib.Path, project_name: str = None):
+def get_comm_pipe(directory_path: pathlib.Path, project_name: Optional[str] = None):
     if project_name is None:
         project_name = directory_path.name
 

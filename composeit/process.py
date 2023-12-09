@@ -11,7 +11,7 @@ import io
 from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
 
-from typing import List, Optional
+from typing import List, Optional, Union, Dict, Any
 
 
 def make_colored(color):
@@ -51,8 +51,8 @@ class AsyncProcess:
 
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
-        self.process: asyncio.subprocess.Process = None
-        self.command: List[str] = self._get_command()
+        self.process: Optional[asyncio.subprocess.Process] = None
+        self.command: Union[str, List[str]] = self._get_command()
         self.start_time = None
         self.stop_time = None
         self.watch_coro = None
@@ -115,7 +115,7 @@ class AsyncProcess:
 
     def get_processes_info(self):
         def serialize_process(p: psutil.Process):
-            row = {}
+            row: Dict[str, Any] = {}
             row["username"] = p.username()
             row["pid"] = p.pid
             row["ppid"] = p.ppid()
@@ -160,7 +160,7 @@ class AsyncProcess:
         self.lout.removeHandler(handler)
         self.lerr.removeHandler(handler)
 
-    def _get_command(self) -> List[str]:
+    def _get_command(self) -> Union[str, List[str]]:
         config = self.service_config
         if config.get("shell", False):
             # TODO, injections?

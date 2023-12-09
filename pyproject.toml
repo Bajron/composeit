@@ -27,6 +27,9 @@ dependencies = [
 dev = [
     "black",
     "pytest",
+    "mypy",
+    "types-PyYAML",
+    "types-psutil",
 ]
 #dynamic = ["version"]
 
