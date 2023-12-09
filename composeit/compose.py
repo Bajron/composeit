@@ -251,6 +251,7 @@ class Compose:
                 signal.signal(signal.SIGINT, signal_handler)
 
                 try:
+                    self.logger.debug("Reading logs")
                     async for line in response.content:
                         print(line.decode(), end="")
                 except asyncio.CancelledError:
@@ -398,7 +399,7 @@ class Compose:
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_top_session())
+            await self.run_client_session(self.make_top_session(services))
         else:
             self.logger.error("Server is not running")
 

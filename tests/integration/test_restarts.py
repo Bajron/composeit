@@ -15,6 +15,7 @@ def test_restarting(process_cleaner):
         # Note: need to wait for it to start the server
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
+        ShowLogs(up.stdout)
 
         # always policy brings the service up on each server start (note we started only "one_shot")
         states = ps(service_directory)

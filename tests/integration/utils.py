@@ -91,10 +91,10 @@ def ps(service_directory, *args, services=None):
     return states
 
 
-def top(service_directory, *args):
+def top(service_directory, *args, services=None):
     header_lines = 2
     top_output = subprocess.check_output(
-        ["composeit", *[str(a) for a in args], "top"], cwd=service_directory
+        ["composeit", *[str(a) for a in args], "top", *(services or [])], cwd=service_directory
     )
     top_lines = [l.decode().strip() for l in io.BytesIO(top_output).readlines()]
     if (
@@ -108,12 +108,13 @@ def top(service_directory, *args):
 
 
 class LogsGatherer:
-    def __init__(self, service_directory, services) -> None:
+    def __init__(self, service_directory, services=None, filtered=True) -> None:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
-        self.log_all = subprocess.Popen(
-            ["composeit", "logs"],
+        args_services = services or []
+        self.process = subprocess.Popen(
+            ["composeit", "logs", *([] if filtered and len(args_services) == 1 else args_services)],
             stdout=subprocess.PIPE,
             cwd=service_directory,
             env=env,
@@ -121,7 +122,10 @@ class LogsGatherer:
         self.log_out = None
         self.log_on = threading.Semaphore(0)
 
-        self.reading_thread = threading.Thread(target=self.read_filtered, args=(services,))
+        if filtered and services is not None:
+            self.reading_thread = threading.Thread(target=self.read_filtered, args=(services,))
+        else:
+            self.reading_thread = threading.Thread(target=self.read_unfiltered)
         self.reading_thread.start()
 
     def get_service_ints(self, service):
@@ -137,16 +141,43 @@ class LogsGatherer:
         encoding = locale.getpreferredencoding(False)
         self.log_on.release()
         for l in [
-            l.decode(encoding, errors="replace").strip() for l in self.log_all.stdout.readlines()
+            l.decode(encoding, errors="replace").strip() for l in self.process.stdout.readlines()
         ]:
             m = log_line.match(l)
             if not m:
                 continue
             self.log_out.append((m["service"], m["log"].strip()))
 
+    def read_unfiltered(self):
+        self.log_out = []
+        encoding = locale.getpreferredencoding(False)
+        self.log_on.release()
+        for l in [
+            l.decode(encoding, errors="replace").strip() for l in self.process.stdout.readlines()
+        ]:
+            self.log_out.append(l)
+
     def stop(self):
-        kill_deepest_child(self.log_all.pid)
+        kill_deepest_child(self.process.pid)
         self.join()
 
     def join(self):
         self.reading_thread.join()
+
+
+class ShowLogs:
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self.thread = threading.Thread(target=self.show)
+        self.thread.start()
+        self.run = True
+
+    def show(self):
+        line = self.stream.readline()
+        while line and self.run:
+            print(line.decode().strip(), flush=True)
+            line = self.stream.readline()
+
+    def stop(self):
+        self.run = False
+        self.thread.join()

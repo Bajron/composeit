@@ -19,6 +19,7 @@ def test_build_single(process_cleaner):
         # Note: need to wait for it to start the server
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
+        ShowLogs(up.stdout)
 
         states = ps(service_directory)
         assert all(v == "stopped" for v in states.values())
@@ -27,10 +28,13 @@ def test_build_single(process_cleaner):
         log = LogsGatherer(service_directory, ["leaf"])
         log.log_on.acquire()
         subprocess.call(["composeit", "start", "leaf"], cwd=service_directory)
-        log.stop()
+        while len(top(service_directory, services=["leaf"])) > 0:
+            time.sleep(0.1)
 
+        log.stop()
         logs = log.get_service("leaf")
-        assert not any("foo" in l for l in log.get_service("leaf"))
+
+        assert not any("foo" in l for l in logs)
         assert len(logs) == 0
         # `root` started, but did not cbuild
         assert not root_build_file.exists()
@@ -47,9 +51,10 @@ def test_build_single(process_cleaner):
             if states and states["leaf"] == "exited":
                 break
             time.sleep(0.1)
+
         log.stop()
         logs = log.get_service("leaf")
-        assert any("foo" in l for l in log.get_service("leaf"))
+        assert any("foo" in l for l in logs)
         assert len(logs) > 0
 
         subprocess.call(["composeit", "stop", "leaf"], cwd=service_directory)
