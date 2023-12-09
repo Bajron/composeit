@@ -173,9 +173,10 @@ class ShowLogs:
         self.run = True
 
     def show(self):
+        encoding = locale.getpreferredencoding(False)
         line = self.stream.readline()
         while line and self.run:
-            print(line.decode().strip(), flush=True)
+            print(line.decode(encoding, errors="replace").strip(), flush=True)
             line = self.stream.readline()
 
     def stop(self):
