@@ -1,7 +1,7 @@
 import logging
 import json
 from logging import LogRecord
-from typing import Dict, List, Mapping, Any, Literal
+from typing import Dict, List, Mapping, Any, Literal, Optional, Union
 from termcolor import colored
 
 
@@ -9,7 +9,7 @@ class LogKeeper(logging.Handler):
     def __init__(
         self,
         window: int = 10,
-        level: int | str = 0,
+        level: Union[int, str] = 0,
     ) -> None:
         super().__init__(level)
         self.window_size: int = window
@@ -24,14 +24,12 @@ class LogKeeper(logging.Handler):
 class JsonFormatter(logging.Formatter):
     def __init__(
         self,
-        fmt: str | None = None,
-        datefmt: str | None = None,
+        fmt: Optional[str] = None,
+        datefmt: Optional[str] = None,
         style: Literal["%", "{", "$"] = "%",
-        validate: bool = True,
-        *,
-        defaults: Mapping[str, Any] | None = None,
+        validate: bool = True
     ) -> None:
-        super().__init__(fmt, datefmt, style, validate, defaults=defaults)
+        super().__init__(fmt, datefmt, style, validate)
 
     def format(self, record):
         json_object = {}
