@@ -11,6 +11,7 @@ import io
 from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
 from .log_utils import LogKeeper
+from .service_config import get_stop_signal, get_stop_grace_period
 
 from typing import List, Optional, Union, Dict, Any
 
@@ -53,6 +54,7 @@ class AsyncProcess:
         self.startup_semaphore = asyncio.Semaphore(0)
         self.process_initialization = None
         self.process: Optional[asyncio.subprocess.Process] = None
+        self.process_wait: Optional[asyncio.Task] = None
         self.command: Union[str, List[str]] = self._get_command()
         self.start_time = None
         self.stop_time = None
@@ -559,16 +561,49 @@ class AsyncProcess:
         self._cancel_sleep()
         if self.rc is None and self.process is not None:
             self.log.debug("Sending terminate signal for stop")
-            self._terminate()
+            await self._terminate()
 
-    def _terminate(self):
+    async def _stop_process(self, force=False):
+        if force:
+            self.log.warning("Killing the process, force kill triggered")
+            self.process.kill()
+            return
+
+        try:
+            signal = get_stop_signal(self.service_config)
+            self.process.send_signal(signal)
+        except Exception as ex:
+            self.log.warning(f"Sending signal failed {ex}")
+            self.process.terminate()
+
+        try:
+            self.process_wait = asyncio.create_task(self.process.wait())
+            await asyncio.wait_for(self.process_wait, get_stop_grace_period(self.service_config))
+        except asyncio.exceptions.TimeoutError:
+            self.log.warning("Killing the process because of timeout")
+            self.process.kill()
+        except asyncio.exceptions.CancelledError:
+            pass
+
+    async def _terminate(self):
         try:
             children = psutil.Process(self.process.pid).children(recursive=True)
         except psutil.NoSuchProcess as ex:
             self.log.warning(f"Process already closed {ex}")
             children = []
+
         self.process.stdin.close()
-        self.process.terminate()
+
+        # We must have entered here second time
+        force = self.process_wait is not None and not self.process_wait.done()
+        if force:
+            self.process_wait.cancel()
+            self.process_wait = None
+
+        await self._stop_process(force)
+
+        if force:
+            self.kill_children(children)
 
         # Tries to fix the leftover processes on Windows
         # Could be different with process group on Linux
@@ -582,23 +617,48 @@ class AsyncProcess:
             if running == 0:
                 break
 
-        # TODO wait for a while until children are running? Then terminate
-        # will block the thread...
+        self.terminate_children(children)
 
+        async def wait_for_children():
+            # TODO, is this cancelable?
+            _, alive = psutil.wait_procs(children, get_stop_grace_period(self.service_config))
+            return alive
+
+        try:
+            self.process_wait = asyncio.create_task(wait_for_children())
+            alive = await self.process_wait
+        except asyncio.exceptions.CancelledError:
+            alive = children
+
+        self.kill_children(alive)
+
+        self.process_wait = None
+
+    def kill_children(self, children):
         for child in children:
-            if child.is_running():
-                try:
-                    self.log.warning(f"Terminating leftover child process {child}")
-                    child.terminate()
-                except psutil.NoSuchProcess:
-                    # Well ok, maybe we are too late
-                    pass
+            if not child.is_running():
+                continue
+            try:
+                self.log.warning(f"Killing leftover child process {child}")
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
 
-    def terminate(self):
+    def terminate_children(self, children):
+        for child in children:
+            if not child.is_running():
+                continue
+            try:
+                self.log.warning(f"Terminating leftover child process {child}")
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
+
+    async def terminate(self):
         self.log.debug(f"Terminating, rc:{self.rc}, process:{self.process}")
         self.terminated = True
         self._cancel_sleep()
         if self.rc is None and self.process is not None:
             self.log.debug("Sending terminate signal for terminate")
-            self._terminate()
+            await self._terminate()
         self.startup_semaphore.release()

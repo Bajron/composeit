@@ -519,7 +519,7 @@ class Compose:
             body = {}
         request_clean = body.get("request_clean", False)
 
-        self.shutdown(request_clean=request_clean)
+        await self.shutdown(request_clean=request_clean)
         return web.json_response("Stopped")
 
     def _get_service(self, request: web.Request):
@@ -738,12 +738,17 @@ class Compose:
             run_server(self.app, self.logger.getChild("http"), self.communication_pipe)
         )
 
-    def shutdown(self, request_clean=False):
-        self.logger.info(" *** Calling terminate on sub processes")
-        for service in self.get_stop_sequence(self.services.keys()):
-            if request_clean:
-                self.services[service].request_clean()
-            self.services[service].terminate()
+    async def shutdown(self, request_clean=False):
+        try:
+            self.logger.info(" *** Calling terminate on sub processes")
+            await_list = []
+            for service in self.get_stop_sequence(self.services.keys()):
+                if request_clean:
+                    self.services[service].request_clean()
+                await_list.append(self.services[service].terminate())
+            await asyncio.gather(*await_list)
+        except Exception as ex:
+            self.logger.error(f"Exception during shutdown: {ex}, {get_stack_string()}")
 
     async def watch_services(
         self,
@@ -777,7 +782,7 @@ class Compose:
                     s.log.setLevel(logging.DEBUG)
 
             def signal_handler(signal, frame):
-                asyncio.get_event_loop().call_soon_threadsafe(self.shutdown)
+                asyncio.get_event_loop().create_task(self.shutdown())
 
             signal.signal(signal.SIGINT, signal_handler)
             # Well, this is not implemented for Windows
@@ -802,7 +807,7 @@ class Compose:
         except Exception as ex:
             self.logger.debug(get_stack_string())
             self.logger.debug(f"Exception during watching services: {ex}")
-            self.shutdown()
+            await self.shutdown()
 
     async def run_client_session(self, session_function):
         try:

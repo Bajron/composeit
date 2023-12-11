@@ -1,0 +1,16 @@
+services:
+  simple1:
+    command: python
+    args:
+      - ../../diehard.py
+    stop_grace_period: 3
+
+  simple2:
+    command: [python, ../../diehard.py]
+    stop_signal: ${INTERRUPT_SIGNAL:-15}
+    stop_grace_period: 3
+
+  simple3:
+    command: [python, ../../diehard.py]
+    stop_signal: SIGTERM
+    stop_grace_period: 10

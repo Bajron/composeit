@@ -73,7 +73,7 @@ I wanted to organize a set of long running processes, not a pipeline.
 Later I also found `honcho`, seems ok for the task.
 
 There is a package called `just-compose` (wanted that name ;( ).
-I foudn it late. It seems to be kind of what I want.
+I found it late. It seems to be kind of what I want.
 I could not find a documentation page for this one.
 The example seems to be quite promising though.
 The PyPy page suggests some specific use case, so I did not try it really.
