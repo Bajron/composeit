@@ -248,11 +248,19 @@ class Compose:
                 params = [("format", "json"), ("context", "on" if context else "no")]
                 if single_service_provided:
                     service = services[0]
-                    return session.get(f"/{project}/{service}/logs", params=params, timeout=0,)
+                    return session.get(
+                        f"/{project}/{service}/logs",
+                        params=params,
+                        timeout=0,
+                    )
                 else:
                     if services:
                         params += [("service", s) for s in services]
-                    return session.get(f"/{project}/logs", params=params, timeout=0,)
+                    return session.get(
+                        f"/{project}/logs",
+                        params=params,
+                        timeout=0,
+                    )
 
             async with logs_request() as response:
                 close_requested = False
@@ -287,7 +295,7 @@ class Compose:
 
         return stream_logs_response
 
-    async def attach(self, service:str, context: bool = False):
+    async def attach(self, service: str, context: bool = False):
         server_up = await self.check_server_is_running()
 
         if server_up:
@@ -403,7 +411,11 @@ class Compose:
                 state = s["state"]
                 if state == "started":
                     since_start = (now - s["start_time"]) if s["start_time"] is not None else None
-                    row["status"] = f"Up {duration_text(since_start)}"
+                    row["status"] = (
+                        f"Up {duration_text(since_start)}"
+                        if since_start is not None
+                        else "starting"
+                    )
                 elif state == "stopped":
                     since_stop = (now - s["stop_time"]) if s["stop_time"] is not None else None
                     rc = s["return_code"]
@@ -414,7 +426,11 @@ class Compose:
                     )
                 elif state == "terminated":
                     since_stop = (now - s["stop_time"]) if s["stop_time"] else None
-                    row["status"] = f"terminated {duration_text(since_stop)} ago"
+                    row["status"] = (
+                        f"terminated {duration_text(since_stop)} ago"
+                        if since_stop is not None
+                        else "terminating"
+                    )
                 else:
                     row["status"] = state
 
@@ -584,7 +600,7 @@ class Compose:
         response.task.add_done_callback(detach_logger)
 
         try:
-            while not response.closed and not self.services[service].terminated:
+            while not response.closed and not self.services[service].terminated_and_done:
                 try:
                     line = await response.receive_str()
 
@@ -632,7 +648,7 @@ class Compose:
 
         try:
             # TODO: cleaner solution? websocket here?
-            while not await back_stream.is_broken() and not process.terminated:
+            while not await back_stream.is_broken() and not process.terminated_and_done:
                 await asyncio.sleep(1)
         finally:
             self.logger.debug("Closing logs request")
@@ -676,7 +692,7 @@ class Compose:
         try:
             # TODO: cleaner solution? websocket here?
             while not await back_stream.is_broken() and not all(
-                [self.services[s].terminated for s in services]
+                [self.services[s].terminated_and_done for s in services]
             ):
                 await asyncio.sleep(1)
         finally:

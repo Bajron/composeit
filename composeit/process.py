@@ -114,6 +114,7 @@ class AsyncProcess:
         self.rc: Optional[int] = None
         self.restarting: bool = False
         self.terminated: bool = False
+        self.terminated_and_done: bool = False
         self.stopped: bool = True
         self.exception = None
 
@@ -160,13 +161,22 @@ class AsyncProcess:
 
     def get_state(self):
         if self.terminated:
-            return "terminated"
+            if self.stop_time is not None:
+                return "terminated"
+            else:
+                return "terminating"
         elif self.restarting:
             return "restarting"
         elif self.stopped:
-            return "stopped"
+            if self.start_time and not self.stop_time:
+                return "stopping"
+            else:
+                return "stopped"
         else:
-            return "started"
+            if self.start_time is not None:
+                return "started"
+            else:
+                return "starting"
 
     def attach_log_handler(self, handler: logging.StreamHandler, provide_context: bool = False):
         if provide_context:
@@ -380,6 +390,8 @@ class AsyncProcess:
         return False
 
     async def watch(self):
+        self.terminated_and_done = False
+
         await self.resolve_build()
 
         while self.execute and not self.terminated:
@@ -422,6 +434,8 @@ class AsyncProcess:
 
         self.log.debug("Restart loop exited")
         await self.resolve_clean()
+
+        self.terminated_and_done = True
 
     async def resolve_build(self):
         if not self.execute_build:

@@ -24,8 +24,7 @@ def kill_deepest_child(pid):
             ch = process.children()
         process.terminate()
     except Exception as ex:
-        print("Problem in kill_deepest_child")
-        pass
+        print(f"Problem in kill_deepest_child: {ex}")
 
 
 def is_sequence(s: List[int]):
@@ -68,7 +67,16 @@ def process_cleaner():
 
 
 def ps_split_to_state(split):
-    for key in ["Up", "exited", "terminated", "restarting", "stopped"]:
+    for key in [
+        "Up",
+        "exited",
+        "terminated",
+        "restarting",
+        "stopped",
+        "terminating",
+        "stopping",
+        "starting",
+    ]:
         if key in split:
             return key.lower()
     return None
@@ -108,13 +116,17 @@ def top(service_directory, *args, services=None):
 
 
 class LogsGatherer:
-    def __init__(self, service_directory, services=None, filtered=True) -> None:
+    def __init__(self, service_directory, services=None, marker_filter=":") -> None:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
 
         args_services = services or []
         self.process = subprocess.Popen(
-            ["composeit", "logs", *([] if filtered and len(args_services) == 1 else args_services)],
+            [
+                "composeit",
+                "logs",
+                *([] if marker_filter and len(args_services) == 1 else args_services),
+            ],
             stdout=subprocess.PIPE,
             cwd=service_directory,
             env=env,
@@ -122,8 +134,10 @@ class LogsGatherer:
         self.log_out = None
         self.log_on = threading.Semaphore(0)
 
-        if filtered and services is not None:
-            self.reading_thread = threading.Thread(target=self.read_filtered, args=(services,))
+        if marker_filter and services is not None:
+            self.reading_thread = threading.Thread(
+                target=self.read_filtered, args=(services, marker_filter)
+            )
         else:
             self.reading_thread = threading.Thread(target=self.read_unfiltered)
         self.reading_thread.start()
@@ -134,10 +148,11 @@ class LogsGatherer:
     def get_service(self, service):
         return list(x[1] for x in filter(lambda x: x[0] == service, self.log_out))
 
-    def read_filtered(self, services):
+    def read_filtered(self, services, marker_filter):
         self.log_out = []
         services = "|".join(services)
-        log_line = re.compile(f"^(?P<service>{services}):\\s+(?P<log>.*)$")
+        marker_filter = f"[{marker_filter}]" if marker_filter else ""
+        log_line = re.compile(f"^(?P<service>{services}){marker_filter}\\s+(?P<log>.*)$")
         encoding = locale.getpreferredencoding(False)
         self.log_on.release()
         for l in [

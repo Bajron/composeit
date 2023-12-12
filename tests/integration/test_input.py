@@ -14,7 +14,7 @@ def test_attach(process_cleaner):
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
-        log = LogsGatherer(service_directory, ["echo"], filtered=False)
+        log = LogsGatherer(service_directory, ["echo"], marker_filter='')
         process_cleaner.append(log.process)
 
         env = os.environ.copy()
