@@ -15,3 +15,7 @@ def get_stop_signal(config: dict) -> signal.Signals:
 
 def get_stop_grace_period(config: dict) -> float:
     return config.get("stop_grace_period", 10)
+
+
+def get_minimal() -> dict:
+    return {"services": []}

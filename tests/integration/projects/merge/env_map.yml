@@ -1,0 +1,6 @@
+services:
+  env:
+    args:
+      - --environment=ENV_BY_MAP
+    environment:
+      ENV_BY_MAP: "by map"

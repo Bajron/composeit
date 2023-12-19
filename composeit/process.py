@@ -245,11 +245,17 @@ class AsyncProcess:
             if isinstance(env_definition, list):
 
                 def make(e):
-                    try:
-                        # Strings are already interpolated during resolve phase
-                        return dotenv.dotenv_values(stream=io.StringIO(e), interpolate=False)
-                    except Exception as ex:
-                        self.log.warning(f"Error parsing environment element ({e}): {ex}")
+                    if isinstance(e, tuple):
+                        return {e[0]: e[1]}
+                    elif isinstance(e, str):
+                        try:
+                            # Strings are already interpolated during resolve phase
+                            return dotenv.dotenv_values(stream=io.StringIO(e), interpolate=False)
+                        except Exception as ex:
+                            self.log.warning(f"Error parsing environment element ({e}): {ex}")
+                            return {}
+                    else:
+                        self.log.warning(f"Unexpected type of {e}")
                         return {}
 
                 entries = [make(e) for e in env_definition]

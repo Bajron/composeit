@@ -1,0 +1,6 @@
+services:
+  env:
+    args:
+      - --environment=ENV_BY_LIST
+    environment:
+      - ENV_BY_LIST="by list"

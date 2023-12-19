@@ -108,7 +108,6 @@ def main():
     cfg_log.debug(f"Working directory: {working_directory}")
 
     file_choices = ["composeit.yml", "composeit.yaml"]
-    # TODO support multiple
     if len(options.file) > 0:
         service_files = [f.absolute() for f in options.file]
     else:
@@ -143,7 +142,7 @@ def main():
             return 1
 
     try:
-        defer_config_load = options.command in ["ps", "top", "logs", "attach"]
+        defer_config_load = options.command in ["ps", "top", "logs", "attach", "stop", "down"]
         compose = Compose(
             project_name,
             working_directory,

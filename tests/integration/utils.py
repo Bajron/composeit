@@ -99,6 +99,16 @@ def ps(service_directory, *args, services=None):
     return states
 
 
+def wait_for_ps(service_directory, *args, services=None, timeout=30):
+    end_time = time.time() + timeout
+    states = None
+    print(args)
+    while states is None and time.time() < end_time:
+        states = ps(service_directory, *args, services=services)
+        time.sleep(0.0625)
+    return states
+
+
 def top(service_directory, *args, services=None):
     header_lines = 2
     top_output = subprocess.check_output(

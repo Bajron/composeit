@@ -179,6 +179,8 @@ python:
 
 - OS dependant behavior?
 
+- Checkout `poetry` and `pipx`
+
 ## Similar tools
 
 It seems creating own compose-like tool is not that uncommon :)

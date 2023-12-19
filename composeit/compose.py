@@ -70,7 +70,7 @@ class Compose:
         self.color_assigner: ColorAssigner = ColorAssigner()
 
         self.service_files: List[pathlib.Path] = service_files
-        self.service_config: dict = {"services": []}
+        self.service_config: Optional[dict] = None
 
         self.depending: Optional[Dict[str, List[str]]] = None
         self.depends: Optional[Dict[str, List[str]]] = None
@@ -172,8 +172,6 @@ class Compose:
     async def down(self, services=None):
         server_up = await self.check_server_is_running()
         if server_up:
-            # TODO: does not call clean until project stops, ok? not ok?
-            #       down -> start may be a problem with the eager clean
             await self.stop(services=services, request_clean=True, server_up=server_up)
         else:
             await self.watch_services(
@@ -676,7 +674,6 @@ class Compose:
         if response_format == "json":
             logs_to_response.setFormatter(JsonFormatter("%(message)s"))
 
-        # TODO: provide some recent logs buffer
         for s in services:
             self.services[s].attach_log_handler(logs_to_response, add_context)
 
@@ -775,6 +772,13 @@ class Compose:
         execute_clean=False,
     ):
         try:
+            if self.service_config is None:
+                self.load_service_config()
+        except Exception as ex:
+            self.logger.error(f"Exception while loading config: {ex}")
+            return
+
+        try:
             if start_server:
                 self.start_server()
 
@@ -824,6 +828,13 @@ class Compose:
             self.logger.debug(get_stack_string())
             self.logger.debug(f"Exception during watching services: {ex}")
             await self.shutdown()
+
+        # TODO how to prevent too early server stop when closing...
+        #      even short sleeps is probably enogh, so the handler can take the loop
+        for _ in range(5):
+            await asyncio.sleep(0.001)
+        if self.app is not None:
+            await self.app.shutdown()
 
     async def run_client_session(self, session_function):
         try:
@@ -1005,18 +1016,22 @@ def merge_services(base, incoming):
                 if isinstance(value, list):
                     base_value += value
                 elif isinstance(value, dict):
-                    print("TODO list vs dict")  # env case? TODO: normalize env to something?
+                    # NOTE: this is not convertible back to a yaml, but can work...
+                    for k, v in value.items():
+                        base_value.append((k, v))
                 else:
                     base_balue += [value]
             elif isinstance(base_value, dict):
                 if isinstance(value, dict):
                     base_value.update(value)
                 elif isinstance(value, list):
-                    print("TODO dict vs list")  # env case? TODO: normalize env to something?
+                    # NOTE: fallback to more general list
+                    base_value = [(k, v) for k, v in base_value.items()] + value
+                    base[key] = base_value
                 else:
                     # TODO just throw? this is weird
                     print("dict vs value")
-                    base_value[value] = None
+                    base_value[f"{value}"] = None
             else:
                 base[key] = value
     return base
