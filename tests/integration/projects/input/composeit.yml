@@ -1,3 +1,4 @@
 services:
   echo:
+    stdin_open: true
     command: [python, ../../echo.py]

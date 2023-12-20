@@ -285,6 +285,8 @@ class AsyncProcess:
             if pt in service_config:
                 popen_kw[pt] = service_config[pt]
 
+        stdin = asyncio.subprocess.PIPE if service_config.get("stdin_open", False) else None
+
         # TODO: Process started with shell kills cmd, but child persists...
 
         # NOTE: This is here to prevent sending CTRL_C_EVENT to children
@@ -299,7 +301,7 @@ class AsyncProcess:
         if service_config.get("shell", False):
             process = await asyncio.create_subprocess_shell(
                 cmd=self.command,
-                stdin=asyncio.subprocess.PIPE,
+                stdin=stdin,
                 stderr=stream_mode,
                 stdout=stream_mode,
                 **popen_kw,
@@ -307,7 +309,7 @@ class AsyncProcess:
         else:
             process = await asyncio.create_subprocess_exec(
                 *self.command,
-                stdin=asyncio.subprocess.PIPE,
+                stdin=stdin,
                 stderr=stream_mode,
                 stdout=stream_mode,
                 **popen_kw,
@@ -612,7 +614,8 @@ class AsyncProcess:
             self.log.warning(f"Process already closed {ex}")
             children = []
 
-        self.process.stdin.close()
+        if self.process.stdin:
+            self.process.stdin.close()
 
         # We must have entered here second time
         force = self.process_wait is not None and not self.process_wait.done()
