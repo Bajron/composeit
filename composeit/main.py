@@ -136,7 +136,7 @@ def main():
     for env_file in env_files:
         if env_file.exists():
             cfg_log.debug(f"Reading environment file {env_file}")
-            dotenv.load_dotenv(env_file, override=True)
+            dotenv.load_dotenv(env_file, override=True, single_quotes_expand=False)
         else:
             print("Provided environment file does not exist", file=sys.stderr)
             return 1

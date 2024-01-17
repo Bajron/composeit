@@ -21,7 +21,9 @@ dependencies = [
     "termcolor",
     "aiohttp",
     "psutil",
-    "python-dotenv",
+    #"python-dotenv",
+    # TODO: version in the other repo so it updates if needed? (seems it is not picked up when dotenv was installed)
+    "python-dotenv @ git+https://github.com/Bajron/python-dotenv.git@string-expansion",
 ]
 [project.optional-dependencies]
 dev = [

@@ -37,7 +37,7 @@ def test_environment_expansions(process_cleaner):
             "FROM_DOT_ENV=foo",
             "FROM_ENV=bar",
             "DOT_AND_ENV=foo and bar",
-            "NOT_EXPANDED=foo",
+            "NOT_EXPANDED=${FROM_DOT_ENV}",
             "EMPTY=",
             "COMPOSEIT_NOT_EXISTENT=",
             "FROM_ENV_SAVED=bar",
@@ -55,8 +55,7 @@ def test_environment_expansions(process_cleaner):
             "FROM_DOT_ENV=foo",
             "FROM_ENV=bar",
             "DOT_AND_ENV=foo and bar",
-            # TODO: depends on single quotes behavior
-            "NOT_EXPANDED=foo",
+            "NOT_EXPANDED=${FROM_DOT_ENV}",
             "EMPTY=",
             "COMPOSEIT_NOT_EXISTENT=None",
             "FROM_ENV_SAVED=bar",
@@ -79,8 +78,7 @@ def test_environment_expansions(process_cleaner):
             "FROM_DOT_ENV=foo",
             "FROM_ENV=bar",
             "DOT_AND_ENV=foo and bar",
-            # TODO: depends on single quotes behavior
-            "NOT_EXPANDED=foo",
+            "NOT_EXPANDED=${FROM_DOT_ENV}",
             "EMPTY=",
             "COMPOSEIT_NOT_EXISTENT=None",
             "FROM_ENV_SAVED=bar",
