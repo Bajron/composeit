@@ -605,7 +605,7 @@ class Compose:
                     process = self.services[service].process
                     if process is None or process.stdin is None:
                         self.logger.warning("Cannot forward the input to the process")
-                        break
+                        continue
                     process.stdin.write(line.encode())
                 except TypeError:
                     break
