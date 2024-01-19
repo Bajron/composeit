@@ -1,4 +1,5 @@
 import logging
+import logging.config
 import asyncio
 import psutil
 import os
@@ -77,6 +78,23 @@ class AsyncProcess:
         self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
         self.color: Optional[str] = color
+
+        created_loggers = [f"{self.name}{c}" for c in ":>*"]
+        if "logging" in service_config:
+            l = service_config["logging"]
+            driver = l.get("driver", "")
+
+            if driver == "logging.config.dictConfig":
+                d = l.get("config", {})
+                d["loggers"] = {
+                    l[0]: l[1] for l in d.get("loggers", {}).items() if l[0] in created_loggers
+                }
+                # TODO warn if set?
+                d["disable_existing_loggers"] = False
+                logging.config.dictConfig(config=d)
+            if driver == "logging.config.dictConfig.shared":
+                # This should be processed separately before starting processes (loggers can share handlers)
+                pass
 
         self._lout: logging.Logger = logging.getLogger(f"{self.name}:")
         self._lerr: logging.Logger = logging.getLogger(f"{self.name}>")

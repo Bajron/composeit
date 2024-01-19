@@ -3,6 +3,8 @@ import io
 from time import strftime, localtime
 import datetime
 import traceback
+import collections.abc
+from typing import Mapping
 
 
 def get_stack_string():
@@ -104,3 +106,13 @@ def resolve(value):
     if isinstance(value, tuple):
         return tuple((resolve(v) for v in value))
     return value
+
+
+# https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth
+def update_dict(d: Mapping, u: Mapping) -> Mapping:
+    for k, v in u.items():
+        if isinstance(v, collections.abc.Mapping):
+            d[k] = update_dict(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d

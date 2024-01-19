@@ -22,10 +22,17 @@ from .log_utils import (
     print_message_prefixed,
     print_color_message_prefixed,
 )
+from .service_config import get_shared_logging_config
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
-from .utils import resolve, duration_text, cumulative_time_text, date_time_text, get_stack_string
+from .utils import (
+    resolve,
+    duration_text,
+    cumulative_time_text,
+    date_time_text,
+    get_stack_string,
+)
 from socket import gethostname
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
@@ -779,6 +786,11 @@ class Compose:
             return
 
         try:
+            shared_logging_config = get_shared_logging_config(self.service_config)
+            if len(shared_logging_config) > 0:
+                shared_logging_config["disable_existing_loggers"] = False
+                logging.config.dictConfig(config=shared_logging_config)
+
             if start_server:
                 self.start_server()
 

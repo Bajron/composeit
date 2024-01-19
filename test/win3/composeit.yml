@@ -1,0 +1,39 @@
+services:
+  ping_log1:
+    command: [ping, -t, 127.0.0.6]
+    # logging:
+    #   driver: logging.config.fileConfig
+    #   fname:
+    #   defaults: null
+    #   disable_existing_loggers: true
+    #   encoding: null
+
+  ping_log2:
+    command: [ping, -t, 127.0.0.7]
+    logging:
+      driver: logging.config.dictConfig
+      config:
+        version: 1
+        # incremental: true
+        disable_existing_loggers: false
+        formatters:
+          brief:
+            format: '%(message)s'
+          precise:
+            format: '%(asctime)s %(levelname)-8s %(name)-15s %(message)s'
+            datefmt: '%Y-%m-%d %H:%M:%S'
+        handlers:
+          console:
+            class : logging.StreamHandler
+            formatter: brief
+            level   : INFO
+            stream  : ext://sys.stdout
+          file:
+            class : logging.handlers.RotatingFileHandler
+            formatter: precise
+            filename: logconfig.log
+            maxBytes: 1024
+            backupCount: 3
+        loggers:
+          "ping_log2:":
+            handlers: [console, file]
