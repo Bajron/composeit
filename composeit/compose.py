@@ -22,7 +22,7 @@ from .log_utils import (
     print_message_prefixed,
     print_color_message_prefixed,
 )
-from .service_config import get_shared_logging_config
+from .service_config import get_shared_logging_config, get_command
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
@@ -67,7 +67,6 @@ class Compose:
         if self.verbose:
             self.logger.setLevel(logging.DEBUG)
         else:
-            # TODO: fix formatting
             self.logger.setLevel(logging.INFO)
 
         self.communication_pipe: str = get_comm_pipe(working_directory, project_name)
@@ -91,6 +90,10 @@ class Compose:
     def load_service_config(self):
         self._parse_service_config()
         self._update_dependencies()
+
+    def assure_service_config(self):
+        if self.service_config is None:
+            self.load_service_config()
 
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
@@ -363,13 +366,20 @@ class Compose:
         if server_up:
             await self.run_client_session(self.make_ps_session(services))
         else:
-            self.logger.error("Server is not running")
+            self.logger.warning("Server is not running")
+            self.assure_service_config()
+            services_info = [
+                {"name": name, "command": get_command(s, self.logger), "state": "-", "sequence": i}
+                for i, (name, s) in enumerate(self.service_config["services"].items())
+            ]
+            self.show_service_status(self.working_directory, self.project_name, services_info)
 
     def make_ps_session(self, services: Optional[List[str]] = None):
         async def client_session(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 compose_data = await response.json()
                 project = compose_data["project_name"]
+                working_directory = compose_data["working_directory"]
 
             nonlocal services
             if services is None:
@@ -382,71 +392,73 @@ class Compose:
                 async with session.get(f"/{project}/{s}") as response:
                     service_data.append(await response.json())
 
-            service_data.sort(key=lambda x: x["sequence"])
-            now = time.time()
-
-            header = [
-                ("name", "NAME", 20),
-                ("command", "COMMAND", 30),
-                ("created", "CREATED", 12),
-                ("status", "STATUS", 18),
-            ]
-            fmt = ""
-            for n, _, w in header:
-                fmt += f"{{{n}:{w}}} "
-            self.logger.debug(f"Format is '{fmt}'")
-
-            info_rows = []
-            for s in service_data:
-                self.logger.debug(f"Service {s}")
-
-                row = {}
-                row["name"] = s["name"]
-
-                cmd = " ".join(s["command"])
-                if len(cmd) > 30:
-                    cmd = cmd[:27] + "..."
-                row["command"] = cmd
-
-                since_build = (now - s["build_time"]) if s["build_time"] is not None else None
-                row["created"] = (
-                    f"{duration_text(since_build)} ago" if since_build is not None else "--"
-                )
-
-                state = s["state"]
-                if state == "started":
-                    since_start = (now - s["start_time"]) if s["start_time"] is not None else None
-                    row["status"] = (
-                        f"Up {duration_text(since_start)}"
-                        if since_start is not None
-                        else "starting"
-                    )
-                elif state == "stopped":
-                    since_stop = (now - s["stop_time"]) if s["stop_time"] is not None else None
-                    rc = s["return_code"]
-                    row["status"] = (
-                        f"exited ({rc}) {duration_text(since_stop)} ago"
-                        if since_stop is not None
-                        else "stopped"
-                    )
-                elif state == "terminated":
-                    since_stop = (now - s["stop_time"]) if s["stop_time"] else None
-                    row["status"] = (
-                        f"terminated {duration_text(since_stop)} ago"
-                        if since_stop is not None
-                        else "terminating"
-                    )
-                else:
-                    row["status"] = state
-
-                info_rows.append(row)
-
-            print(f"Project: {project}, in {compose_data['working_directory']}")
-            print(fmt.format(**{k: v for k, v, _ in header}))
-            for row in info_rows:
-                print(fmt.format(**row))
+            self.show_service_status(working_directory, project, service_data)
 
         return client_session
+
+    def show_service_status(self, working_directory, project, service_data):
+        service_data.sort(key=lambda x: x["sequence"])
+        now = time.time()
+
+        header = [
+            ("name", "NAME", 20),
+            ("command", "COMMAND", 30),
+            ("created", "CREATED", 12),
+            ("status", "STATUS", 18),
+        ]
+        fmt = ""
+        for n, _, w in header:
+            fmt += f"{{{n}:{w}}} "
+        self.logger.debug(f"Format is '{fmt}'")
+
+        info_rows = []
+        for s in service_data:
+            self.logger.debug(f"Service {s}")
+
+            row = {}
+            row["name"] = s["name"]
+
+            cmd = " ".join(s["command"])
+            if len(cmd) > 30:
+                cmd = cmd[:27] + "..."
+            row["command"] = cmd
+
+            build_time = s.get("build_time", None)
+            since_build = (now - build_time) if build_time is not None else None
+            row["created"] = (
+                f"{duration_text(since_build)} ago" if since_build is not None else "--"
+            )
+
+            state = s["state"]
+            if state == "started":
+                since_start = (now - s["start_time"]) if s["start_time"] is not None else None
+                row["status"] = (
+                    f"Up {duration_text(since_start)}" if since_start is not None else "starting"
+                )
+            elif state == "stopped":
+                since_stop = (now - s["stop_time"]) if s["stop_time"] is not None else None
+                rc = s["return_code"]
+                row["status"] = (
+                    f"exited ({rc}) {duration_text(since_stop)} ago"
+                    if since_stop is not None
+                    else "stopped"
+                )
+            elif state == "terminated":
+                since_stop = (now - s["stop_time"]) if s["stop_time"] else None
+                row["status"] = (
+                    f"terminated {duration_text(since_stop)} ago"
+                    if since_stop is not None
+                    else "terminating"
+                )
+            else:
+                row["status"] = state
+
+            info_rows.append(row)
+
+        print(f"Project: {project}, in {working_directory}")
+        print(fmt.format(**{k: v for k, v, _ in header}))
+        for row in info_rows:
+            print(fmt.format(**row))
 
     async def top(self, services: Optional[List[str]] = None):
         server_up = await self.check_server_is_running()
@@ -461,6 +473,7 @@ class Compose:
             async with session.get(f"/") as response:
                 compose_data = await response.json()
                 project = compose_data["project_name"]
+                working_directory = compose_data["working_directory"]
 
             nonlocal services
             if services is None:
@@ -504,7 +517,7 @@ class Compose:
             for process_info in processes:
                 info_rows.append(make_row(process_info))
 
-            print(f"Project: {project}, in {compose_data['working_directory']}")
+            print(f"Project: {project}, in {working_directory}")
             print(fmt.format(**{k: v for k, v, _ in header}))
             for row in info_rows:
                 print(fmt.format(**row))
@@ -779,8 +792,7 @@ class Compose:
         execute_clean=False,
     ):
         try:
-            if self.service_config is None:
-                self.load_service_config()
+            self.assure_service_config()
         except Exception as ex:
             self.logger.error(f"Exception while loading config: {ex}")
             return
@@ -841,8 +853,8 @@ class Compose:
             self.logger.debug(f"Exception during watching services: {ex}")
             await self.shutdown()
 
-        # TODO how to prevent too early server stop when closing...
-        #      even short sleeps is probably enogh, so the handler can take the loop
+        # It is here to prevent too early server stop when closing...
+        # Even short sleeps are probably enogh, so the handler can take the loop.
         for _ in range(5):
             await asyncio.sleep(0.001)
         if self.app is not None:

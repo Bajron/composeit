@@ -84,9 +84,16 @@ def ps_split_to_state(split):
 
 def ps(service_directory, *args, services=None):
     header_lines = 2
-    ps_output = subprocess.check_output(
-        ["composeit", *[str(a) for a in args], "ps", *(services or [])], cwd=service_directory
+    ps_out = subprocess.run(
+        ["composeit", *[str(a) for a in args], "ps", *(services or [])],
+        cwd=service_directory,
+        capture_output=True,
     )
+    if ps_out.stderr:
+        print(ps_out.stderr)
+        return None
+
+    ps_output = ps_out.stdout
     ps_lines = [l.decode().strip() for l in io.BytesIO(ps_output).readlines()]
     if (
         len(ps_lines) < 2
@@ -95,6 +102,7 @@ def ps(service_directory, *args, services=None):
     ):
         # Bad call, not even receiving a header
         return None
+
     states = {sp[0]: ps_split_to_state(sp) for sp in [ps.split() for ps in ps_lines[header_lines:]]}
     return states
 
