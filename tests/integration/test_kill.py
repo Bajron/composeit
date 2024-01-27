@@ -75,3 +75,5 @@ def test_kill(process_cleaner):
         assert rc is not None
         rc = log.process.wait(5)
         assert rc is not None
+        rc = down.wait(5)
+        assert rc is not None
