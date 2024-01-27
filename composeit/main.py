@@ -7,8 +7,11 @@ import dotenv
 import asyncio
 import pprint
 
+from typing import Dict
+
 from .compose import Compose
 from .utils import get_stack_string
+from .service_config import get_dict_from_env_list
 
 
 def main():
@@ -36,6 +39,9 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="sub-command help")
     parser_up = subparsers.add_parser("up", help="Startup the services")
     parser_up.add_argument("--build", default=False, action="store_true", help="Rebuild services")
+    parser_up.add_argument(
+        "--build-arg", nargs="*", help="Environment variable to set during the build"
+    )
     parser_up.add_argument("service", nargs="*", help="Specific service to start")
     parser_up.add_argument(
         "--no-start",
@@ -54,6 +60,9 @@ def main():
     )
 
     parser_build = subparsers.add_parser("build", help="Build the services")
+    parser_build.add_argument(
+        "--build-arg", nargs="*", help="Environment variable to set during the build"
+    )
     parser_build.add_argument("service", nargs="*", help="Specific service to build")
 
     parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
@@ -160,6 +169,12 @@ def main():
             return 1
 
     try:
+        build_args: Dict[str, str] = {}
+        if hasattr(options, "build_arg"):
+            build_args = get_dict_from_env_list(
+                options.build_arg or [], cfg_log.getChild("build_arg")
+            )
+
         defer_config_load = options.command in ["ps", "top", "logs", "attach", "stop", "down"]
         compose = Compose(
             project_name,
@@ -168,6 +183,7 @@ def main():
             verbose=options.verbose,
             use_color=use_color,
             defer_config_load=defer_config_load,
+            build_args=build_args,
         )
 
         if hasattr(options, "command") and options.command is not None:
@@ -191,6 +207,7 @@ def main():
             elif options.command == "logs":
                 return asyncio.run(compose.logs(services, options.with_context))
             elif options.command == "attach":
+                assert services is not None and len(services) == 1
                 return asyncio.run(compose.attach(services[0], options.with_context))
             elif options.command == "config":
                 return pprint.pprint(compose.service_config)

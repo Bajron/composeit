@@ -14,7 +14,7 @@ import time
 from aiohttp import web, ClientConnectorError, ClientResponseError
 from json.decoder import JSONDecodeError
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union, Iterable, Mapping
 
 from .log_utils import (
     JsonFormatter,
@@ -57,6 +57,7 @@ class Compose:
         verbose: bool = False,
         use_color: bool = True,
         defer_config_load: bool = False,
+        build_args: Optional[Dict[str, str]] = None,
     ) -> None:
         self.project_name: str = project_name
         self.working_directory: pathlib.Path = working_directory
@@ -78,11 +79,13 @@ class Compose:
         self.service_files: List[pathlib.Path] = service_files
         self.service_config: Optional[dict] = None
 
-        self.depending: Optional[Dict[str, List[str]]] = None
-        self.depends: Optional[Dict[str, List[str]]] = None
+        self.depending: Optional[Mapping[str, Iterable[str]]] = None
+        self.depends: Optional[Mapping[str, Iterable[str]]] = None
 
         if not defer_config_load:
             self.load_service_config()
+
+        self.build_args: Dict[str, str] = build_args or {}
 
         self.services: Dict[str, AsyncProcess] = {}
         self.app: Optional[Application] = None
@@ -108,9 +111,11 @@ class Compose:
         self.service_config = resolve(parsed_data)
 
     def _update_dependencies(self):
+        assert self.service_config is not None and "services" in self.service_config
+
         services = self.service_config["services"]
-        depending = {k: [] for k in services.keys()}
-        depends = {k: [] for k in services.keys()}
+        depending: Dict[str, List[str]] = {k: [] for k in services.keys()}
+        depends: Dict[str, List[str]] = {k: [] for k in services.keys()}
 
         for name, service in services.items():
             if "depends_on" in service:
@@ -125,11 +130,11 @@ class Compose:
         self.depending = depending
         self.depends = depends
 
-    def get_start_sequence(self, services: List[str]) -> List[str]:
+    def get_start_sequence(self, services: Iterable[str]) -> List[str]:
         assert self.depends is not None
         return topological_sequence(services, self.depends)
 
-    def get_stop_sequence(self, services: List[str]) -> List[str]:
+    def get_stop_sequence(self, services: Iterable[str]) -> List[str]:
         assert self.depending is not None
         return topological_sequence(services, self.depending)
 
@@ -250,11 +255,9 @@ class Compose:
                 data = await response.json()
                 project = data["project_name"]
 
-            single_service_provided = services is not None and len(services) == 1
-
             def logs_request():
                 params = [("format", "json"), ("context", "on" if context else "no")]
-                if single_service_provided:
+                if services is not None and len(services) == 1:
                     service = services[0]
                     return session.get(
                         f"/{project}/{service}/logs",
@@ -280,6 +283,7 @@ class Compose:
 
                 signal.signal(signal.SIGINT, signal_handler)
 
+                single_service_provided = services is not None and len(services) == 1
                 print_function = (
                     print_message
                     if single_service_provided
@@ -368,6 +372,7 @@ class Compose:
         else:
             self.logger.warning("Server is not running")
             self.assure_service_config()
+            assert self.service_config is not None
             services_info = [
                 {"name": name, "command": get_command(s, self.logger), "state": "-", "sequence": i}
                 for i, (name, s) in enumerate(self.service_config["services"].items())
@@ -797,6 +802,8 @@ class Compose:
             self.logger.error(f"Exception while loading config: {ex}")
             return
 
+        assert self.service_config is not None
+
         try:
             shared_logging_config = get_shared_logging_config(self.service_config)
             if len(shared_logging_config) > 0:
@@ -815,6 +822,7 @@ class Compose:
                     execute=execute,
                     execute_build=execute_build,
                     execute_clean=execute_clean,
+                    build_args=self.build_args,
                 )
                 for (index, (name, service_config)) in enumerate(
                     self.service_config["services"].items()
@@ -1044,7 +1052,7 @@ def merge_services(base, incoming):
                     for k, v in value.items():
                         base_value.append((k, v))
                 else:
-                    base_balue += [value]
+                    base_value += [value]
             elif isinstance(base_value, dict):
                 if isinstance(value, dict):
                     base_value.update(value)

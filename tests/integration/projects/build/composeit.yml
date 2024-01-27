@@ -3,12 +3,12 @@ services:
     depends_on: middle
     build:
       shell_sequence:
-      - echo foo > message_leaf.tmp
+        - echo foo > message_leaf.tmp
     shell: true
     command: python ../../echo.py < message_leaf.tmp
     clean:
       shell_sequence:
-      - python -c "import os; os.unlink('message_leaf.tmp')"
+        - python -c "import os; os.unlink('message_leaf.tmp')"
 
   middle:
     depends_on: root
@@ -17,8 +17,8 @@ services:
   root:
     build:
       shell_sequence:
-      - echo bar > message_root.tmp
+        - echo bar > message_root.tmp
     command: [python, ../../counter.py, --time, 2]
     clean:
       shell_sequence:
-      - python -c "import os; os.unlink('message_root.tmp')"
+        - python -c "import os; os.unlink('message_root.tmp')"

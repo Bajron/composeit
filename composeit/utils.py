@@ -4,8 +4,7 @@ from time import strftime, localtime
 import datetime
 import traceback
 import collections.abc
-from typing import Mapping
-
+from typing import Mapping, Dict
 
 def get_stack_string():
     buffer = io.StringIO()
@@ -109,7 +108,7 @@ def resolve(value):
 
 
 # https://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth
-def update_dict(d: Mapping, u: Mapping) -> Mapping:
+def update_dict(d: Dict, u: Mapping) -> Dict:
     for k, v in u.items():
         if isinstance(v, collections.abc.Mapping):
             d[k] = update_dict(d.get(k, {}), v)

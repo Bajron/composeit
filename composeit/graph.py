@@ -1,7 +1,7 @@
-from typing import Dict, List, Set
+from typing import Mapping, List, Set, Iterable
 
 
-def topological_sequence(nodes: List[str], neighbors: Dict[str, List[str]]) -> List[str]:
+def topological_sequence(nodes: Iterable[str], neighbors: Mapping[str, Iterable[str]]) -> List[str]:
     sequence: List[str] = []
     visited: Set[str] = set()
     for n in nodes:
@@ -11,7 +11,7 @@ def topological_sequence(nodes: List[str], neighbors: Dict[str, List[str]]) -> L
     return sequence
 
 
-def topological_sort(node: str, neighbors: Dict[str, List[str]], visited: set, resolving: set):
+def topological_sort(node: str, neighbors: Mapping[str, Iterable[str]], visited: set, resolving: set):
     if node in resolving:
         raise Exception(f"Cyclic dependency ({node})")
     resolving.add(node)

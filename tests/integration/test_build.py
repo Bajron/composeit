@@ -164,3 +164,46 @@ def test_clean_single(process_cleaner):
             os.unlink(build_file)
         if root_build_file.exists():
             os.unlink(root_build_file)
+
+
+def test_build_env(process_cleaner):
+    service_directory = tests_directory / "projects" / "build_env"
+    build_file = service_directory / "env_build.tmp"
+
+    try:
+        up: subprocess.Popen = None
+        assert not build_file.exists()
+
+        up = subprocess.Popen(
+            ["composeit", "up", "--build-arg", "B2=yy"],
+            cwd=service_directory,
+            stdout=subprocess.PIPE,
+        )
+        process_cleaner.append(up)
+        # Note: need to wait for it to start the server
+        first_line = up.stdout.readline().decode()
+        assert first_line.startswith("Server created")
+
+        for _ in range(20):
+            states = ps(service_directory, services=["env_build"])
+            if states and states["env_build"] == "exited":
+                break
+        assert states["env_build"] == "exited"
+        assert build_file.exists()
+
+        assert build_file.read_text().strip() == "B1xxB2yyEND"
+
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        for _ in range(20):
+            states = ps(service_directory, services=["env_build"])
+            if not states:
+                break
+
+        assert not build_file.exists()
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        if up:
+            up.wait(5)
+
+        if build_file.exists():
+            os.unlink(build_file)

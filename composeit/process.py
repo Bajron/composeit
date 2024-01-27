@@ -7,14 +7,16 @@ import locale
 import sys
 import subprocess
 import time
-import dotenv
-import io
 from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
 from .log_utils import LogKeeper
-from .service_config import get_stop_signal, get_stop_grace_period
+from .service_config import (
+    get_stop_signal,
+    get_stop_grace_period,
+    get_environemnt,
+)
 
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Union, Dict, Any, Coroutine
 
 
 def make_colored(color):
@@ -41,6 +43,7 @@ class AsyncProcess:
         execute: bool = True,
         execute_build: bool = False,
         execute_clean: bool = False,
+        build_args: Optional[Dict[str, str]] = None,
     ):
         self.sequence: int = sequence
         self.name: str = name
@@ -50,19 +53,21 @@ class AsyncProcess:
         self.execute_build: bool = execute_build
         self.execute_clean: bool = execute_clean
 
-        self.build_time = None
+        self.build_time: Optional[float] = None
 
         self.startup_semaphore = asyncio.Semaphore(0)
-        self.process_initialization = None
+        self.process_initialization: Optional[Coroutine] = None
         self.process: Optional[asyncio.subprocess.Process] = None
         self.process_wait: Optional[asyncio.Task] = None
         self.command: Union[str, List[str]] = self._get_command()
-        self.start_time = None
-        self.stop_time = None
-        self.watch_coro = None
-        self.sleep_task = None
+        self.start_time: Optional[float] = None
+        self.stop_time: Optional[float] = None
+        self.watch_coro: Optional[asyncio.Future] = None
+        self.sleep_task: Optional[asyncio.Task] = None
 
         self.preferred_encoding = locale.getpreferredencoding(False)
+
+        self.build_args: Dict[str, str] = build_args or {}
 
         # NOTE: YAML translates `no` to False
         self.restart_policy = service_config.get("restart", "no") or "no"
@@ -127,14 +132,14 @@ class AsyncProcess:
         self._lerr.addHandler(self.lerr_keeper)
         self._lerr.propagate = False
 
-        self.popen_kw: dict = {}
+        self.popen_kw: Dict[str, Any] = {}
 
         self.rc: Optional[int] = None
         self.restarting: bool = False
         self.terminated: bool = False
         self.terminated_and_done: bool = False
         self.stopped: bool = True
-        self.exception = None
+        self.exception: Optional[Exception] = None
 
     def _adapt_logger(self, logger: logging.Logger) -> logging.LoggerAdapter:
         return logging.LoggerAdapter(
@@ -167,7 +172,7 @@ class AsyncProcess:
             return row
 
         processes = []
-        if self.rc is None:
+        if self.rc is None and self.process is not None:
             try:
                 p = psutil.Process(self.process.pid)
                 processes.append(serialize_process(p))
@@ -236,55 +241,7 @@ class AsyncProcess:
     async def _make_process(self):
         service_config = self.service_config
 
-        if service_config.get("inherit_environment", True):
-            env = None
-        else:
-            # TODO: minimal viable env
-            if os.name == "nt":
-                env = {"SystemRoot": os.environ.get("SystemRoot", "")}
-            else:
-                env = {}
-
-        if "env_file" in service_config or "environment" in service_config:
-            if env is None:
-                env = os.environ.copy()
-
-        if "env_file" in service_config:
-            ef = service_config["env_file"]
-            if not isinstance(ef, list):
-                ef = [ef]
-            for f in ef:
-                env.update(dotenv.dotenv_values(f))
-
-        if "environment" in service_config:
-            env_definition = service_config["environment"]
-            if isinstance(env_definition, str):
-                env_definition = [env_definition]
-            if isinstance(env_definition, list):
-
-                def make(e):
-                    if isinstance(e, tuple):
-                        return {e[0]: e[1]}
-                    elif isinstance(e, str):
-                        try:
-                            # Strings are already interpolated during resolve phase
-                            return dotenv.dotenv_values(stream=io.StringIO(e), interpolate=False)
-                        except Exception as ex:
-                            self.log.warning(f"Error parsing environment element ({e}): {ex}")
-                            return {}
-                    else:
-                        self.log.warning(f"Unexpected type of {e}")
-                        return {}
-
-                entries = [make(e) for e in env_definition]
-                to_add = {
-                    k: v if v is not None else os.environ.get(k, "")
-                    for d in entries
-                    for k, v in d.items()
-                }
-            if isinstance(env_definition, dict):
-                to_add = {k: str(v) for k, v in env_definition.items()}
-            env.update(to_add)
+        env = get_environemnt(service_config, self.log)
 
         stream_mode = asyncio.subprocess.PIPE
         if "logging" in service_config:
@@ -293,7 +250,7 @@ class AsyncProcess:
             if driver == "none":
                 stream_mode = asyncio.subprocess.DEVNULL
 
-        self.popen_kw = popen_kw = {"env": env}
+        popen_kw = self.popen_kw = {"env": env}
 
         if "working_dir" in service_config:
             popen_kw["cwd"] = service_config["working_dir"]
@@ -317,6 +274,7 @@ class AsyncProcess:
 
         self.command = self._get_command()
         if service_config.get("shell", False):
+            assert isinstance(self.command, str)
             process = await asyncio.create_subprocess_shell(
                 cmd=self.command,
                 stdin=stdin,
@@ -325,6 +283,7 @@ class AsyncProcess:
                 **popen_kw,
             )
         else:
+            assert isinstance(self.command, list)
             process = await asyncio.create_subprocess_exec(
                 *self.command,
                 stdin=stdin,
@@ -368,6 +327,7 @@ class AsyncProcess:
         return ascii_escaped
 
     async def wait_for_code(self):
+        assert self.process is not None
         self.rc = await self.process.wait()
         self.stop_time = time.time()
 
@@ -403,6 +363,7 @@ class AsyncProcess:
             try:
                 self.log.debug(f"Verifying successful startup for {success_after} seconds")
                 # Prevent cancelation
+                assert self.watch_coro is not None
                 shielded_watch = asyncio.shield(self.watch_coro)
                 await asyncio.wait_for(shielded_watch, success_after)
             except asyncio.exceptions.TimeoutError:
@@ -439,6 +400,7 @@ class AsyncProcess:
                     process_started = True
 
                 while process_started:
+                    assert self.watch_coro is not None
                     await self.watch_coro
                     self.log.info(
                         f"{self.service_config['command']} finished with error code {self.rc}"
@@ -469,7 +431,7 @@ class AsyncProcess:
 
         build_rc = await self._build()
         if build_rc != 0:
-            self.log("Build failed")
+            self.log.error("Build failed")
             self.execute = False
             self.execute_build = True
         else:
@@ -480,10 +442,17 @@ class AsyncProcess:
     async def _build(self):
         if "build" in self.service_config:
             b = self.service_config["build"]
+            env = get_environemnt(b, self.log)
+
+            if self.build_args:
+                if env is None:
+                    env = os.environ.copy()
+                env.update(self.build_args)
+
             if "shell_sequence" in b:
                 self.log.debug("Processing build sequence")
                 for cmd in b["shell_sequence"]:
-                    rc = await self.execute_command(cmd)
+                    rc = await self.execute_command(cmd, env=env)
                     if rc != 0:
                         self.log.warning(f"Build sequence interrupted with error")
                         break
@@ -516,21 +485,22 @@ class AsyncProcess:
                         # We continue to cleanup as much as possible
         return worst_rc
 
-    async def execute_command(self, cmd):
+    async def execute_command(self, cmd, **kwargs):
         # NOTE: this one should not be supressed by logging: none
         stream_mode = asyncio.subprocess.PIPE
 
         self.log.debug(f"Executing {cmd}")
         if isinstance(cmd, list):
             process = await asyncio.create_subprocess_exec(
-                *cmd, stdin=asyncio.subprocess.PIPE, stderr=stream_mode, stdout=stream_mode
-            )
-        else:
-            process = await asyncio.create_subprocess_shell(
-                cmd,
+                *cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stderr=stream_mode,
                 stdout=stream_mode,
+                **kwargs,
+            )
+        else:
+            process = await asyncio.create_subprocess_shell(
+                cmd, stdin=asyncio.subprocess.PIPE, stderr=stream_mode, stdout=stream_mode, **kwargs
             )
 
         await asyncio.gather(self.watch_stderr(process), self.watch_stdout(process))
@@ -581,11 +551,13 @@ class AsyncProcess:
         return True
 
     def _make_watch_coro(self):
+        assert self.process is not None
         self.watch_coro = asyncio.gather(
             self.wait_for_code(), self.watch_stderr(self.process), self.watch_stdout(self.process)
         )
 
     async def started(self):
+        assert self.process_initialization is not None
         self.process = await self.process_initialization
         self._make_watch_coro()
 
@@ -604,6 +576,8 @@ class AsyncProcess:
             await self._terminate()
 
     async def _stop_process(self, force=False):
+        assert self.process is not None
+
         if force:
             self.log.warning("Killing the process, force kill triggered")
             self.process.kill()
@@ -626,6 +600,8 @@ class AsyncProcess:
             pass
 
     async def _terminate(self):
+        assert self.process is not None
+
         try:
             children = psutil.Process(self.process.pid).children(recursive=True)
         except psutil.NoSuchProcess as ex:
@@ -638,6 +614,7 @@ class AsyncProcess:
         # We must have entered here second time
         force = self.process_wait is not None and not self.process_wait.done()
         if force:
+            assert self.process_wait is not None
             self.process_wait.cancel()
             self.process_wait = None
 

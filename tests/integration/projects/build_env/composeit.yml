@@ -1,0 +1,16 @@
+services:
+  env_build:
+    build:
+      environment:
+        B1: xx
+      shell_sequence:
+        - [
+            python,
+            -c,
+            "import os, pathlib; pathlib.Path('env_build.tmp').write_text('B1' + os.environ.get('B1','') + 'B2'+ os.environ.get('B2','')+ 'END')",
+          ]
+    shell: true
+    command: python ../../echo.py < env_build.tmp
+    clean:
+      shell_sequence:
+        - python -c "import os; os.unlink('env_build.tmp')"
