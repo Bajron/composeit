@@ -94,16 +94,16 @@ def resolve_string(s: str) -> str:
     # TODO: single quotes
 
 
-def resolve(value):
+def interpolate_variables(value):
     if isinstance(value, list):
-        return [resolve(e) for e in value]
+        return [interpolate_variables(e) for e in value]
     if isinstance(value, dict):
         # TODO, is resolving key safe? For env, it is not handled in docker-compose
-        return {resolve(k): resolve(v) for k, v in value.items()}
+        return {interpolate_variables(k): interpolate_variables(v) for k, v in value.items()}
     if isinstance(value, str):
         return resolve_string(value)
     if isinstance(value, tuple):
-        return tuple((resolve(v) for v in value))
+        return tuple((interpolate_variables(v) for v in value))
     return value
 
 

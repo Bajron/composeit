@@ -27,7 +27,7 @@ from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
 from .utils import (
-    resolve,
+    interpolate_variables,
     duration_text,
     cumulative_time_text,
     date_time_text,
@@ -90,25 +90,41 @@ class Compose:
         self.services: Dict[str, AsyncProcess] = {}
         self.app: Optional[Application] = None
 
-    def load_service_config(self):
-        self._parse_service_config()
+    def load_service_config(self, **load_options):
+        self._parse_service_config(**load_options)
         self._update_dependencies()
 
-    def assure_service_config(self):
+    def assure_service_config(self, **load_options):
         if self.service_config is None:
-            self.load_service_config()
+            self.load_service_config(**load_options)
 
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
 
-    def _parse_service_config(self):
+    def _parse_service_config(self, check_consistency=True, interpolate=True, normalize=True, resolve_paths=True):
         parsed_files = [
             yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.service_files
         ]
-        # TODO validate format
-        parsed_data = merge_configs(parsed_files)
 
-        self.service_config = resolve(parsed_data)
+        parsed_data = merge_configs(parsed_files)
+        # TODO validate format
+
+        self.service_config = parsed_data
+
+        if check_consistency:
+            # TODO check consistency
+            pass
+
+        if interpolate:
+            self.service_config = interpolate_variables(self.service_config)
+
+        if normalize:
+            # TODO: normalize format (might be good for env for example)
+            pass
+
+        if resolve_paths:
+            # TODO: resolve paths, (surely this could help with relative paths behavior)
+            pass
 
     def _update_dependencies(self):
         assert self.service_config is not None and "services" in self.service_config

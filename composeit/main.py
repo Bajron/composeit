@@ -5,7 +5,6 @@ import sys
 import logging
 import dotenv
 import asyncio
-import pprint
 
 from typing import Dict
 
@@ -40,7 +39,10 @@ def main():
     parser_up = subparsers.add_parser("up", help="Startup the services")
     parser_up.add_argument("--build", default=False, action="store_true", help="Rebuild services")
     parser_up.add_argument(
-        "--build-arg", nargs="*", help="Environment variable to set during the build"
+        "--build-arg",
+        nargs="*",
+        metavar="<key>=<value>",
+        help="Environment variable to set during the build",
     )
     parser_up.add_argument("service", nargs="*", help="Specific service to start")
     parser_up.add_argument(
@@ -61,7 +63,10 @@ def main():
 
     parser_build = subparsers.add_parser("build", help="Build the services")
     parser_build.add_argument(
-        "--build-arg", nargs="*", help="Environment variable to set during the build"
+        "--build-arg",
+        nargs="*",
+        metavar="<key>=<value>",
+        help="Environment variable to set during the build",
     )
     parser_build.add_argument("service", nargs="*", help="Specific service to build")
 
@@ -102,6 +107,57 @@ def main():
     parser_top.add_argument("service", nargs="*", help="Specific services to show processes from")
 
     parser_config = subparsers.add_parser("config", help="Show services config")
+    parser_config.add_argument("service", nargs="*", help="Specific services to show config of")
+    parser_config.add_argument(
+        "--format",
+        choices=["yaml", "json"],
+        default="yaml",
+        help="Output format",
+    )
+    parser_config.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        default=None,
+        help="Output file path (default is standard output)",
+    )
+    parser_config.add_argument(
+        "-q",
+        "--quiet",
+        default=False,
+        action="store_true",
+        help="Do not output anything, just validate",
+    )
+    parser_config.add_argument(
+        "--services",
+        default=False,
+        action="store_true",
+        help="Print services list, one per line",
+    )
+    parser_config.add_argument(
+        "--no-consistency",
+        default=False,
+        action="store_true",
+        help="Disables consistency checks",
+    )
+    parser_config.add_argument(
+        "--no-interpolate",
+        default=False,
+        action="store_true",
+        help="Disables environment variables expansion",
+    )
+    parser_config.add_argument(
+        "--no-normalize",
+        default=False,
+        action="store_true",
+        help="Disables format normalization",
+    )
+    parser_config.add_argument(
+        "--no-path-resolution",
+        default=False,
+        action="store_true",
+        help="Disables path resolution",
+    )
 
     options = parser.parse_args()
 
@@ -175,7 +231,15 @@ def main():
                 options.build_arg or [], cfg_log.getChild("build_arg")
             )
 
-        defer_config_load = options.command in ["ps", "top", "logs", "attach", "stop", "down"]
+        defer_config_load = options.command in [
+            "ps",
+            "top",
+            "logs",
+            "attach",
+            "stop",
+            "down",
+            "config",
+        ]
         compose = Compose(
             project_name,
             working_directory,
@@ -210,7 +274,7 @@ def main():
                 assert services is not None and len(services) == 1
                 return asyncio.run(compose.attach(services[0], options.with_context))
             elif options.command == "config":
-                return pprint.pprint(compose.service_config)
+                return process_config_option(compose, options)
             elif options.command == "ps":
                 return asyncio.run(compose.ps(services))
             elif options.command == "top":
@@ -224,3 +288,41 @@ def main():
     else:
         parser.print_help()
         return 1
+
+
+import yaml
+import json
+
+
+def process_config_option(compose: Compose, options):
+    assert compose.service_config is None
+
+    compose.assure_service_config(
+        check_consistency=not options.no_consistency,
+        interpolate=not options.no_interpolate,
+        normalize=not options.no_normalize,
+        resolve_paths=not options.no_path_resolution,
+    )
+
+    assert compose.service_config is not None
+
+    if hasattr(options, "service") and len(options.service) > 0:
+        compose.service_config["services"] = dict(
+            filter(lambda kv: kv[0] in options.service, compose.service_config["services"].items())
+        )
+
+    if options.quiet:
+        return
+
+    with open(options.output, "w") if options.output is not None else open(
+        sys.stdout.fileno(), "w", closefd=False
+    ) as stream:
+        if options.services:
+            for s in compose.service_config["services"].keys():
+                print(s, file=stream)
+            return
+
+        if options.format == "json":
+            json.dump(compose.service_config, fp=stream, indent=2)
+        elif options.format == "yaml":
+            yaml.dump(compose.service_config, stream=stream)

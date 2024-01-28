@@ -1,0 +1,7 @@
+services:
+  first:
+    command: ["${APP:-python}", "-v"]
+  second:
+    command:
+      - python
+      - -v
