@@ -71,10 +71,12 @@ def main():
     parser_build.add_argument("service", nargs="*", help="Specific service to build")
 
     parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
-    parser_down.add_argument("service", nargs="*", help="Specific service to close")
+    parser_down.add_argument("service", nargs="*", help="Specific service to cleanup")
+    parser_down.add_argument("--timeout", "-t", type=float, help="Timeout for shutdown in seconds")
 
     parser_stop = subparsers.add_parser("stop", help="Close the services")
     parser_stop.add_argument("service", nargs="*", help="Specific service to close")
+    parser_stop.add_argument("--timeout", "-t", type=float, help="Timeout for shutdown in seconds")
 
     parser_logs = subparsers.add_parser("logs", help="Show logs from the services")
     parser_logs.add_argument("service", nargs="*", help="Specific services to show logs from")
@@ -265,9 +267,11 @@ def main():
             elif options.command == "build":
                 return asyncio.run(compose.build(services))
             elif options.command == "down":
-                return asyncio.run(compose.down(services))
+                timeout = options.timeout if hasattr(options, "timeout") else None
+                return asyncio.run(compose.down(services, timeout=timeout))
             elif options.command == "stop":
-                return asyncio.run(compose.stop(services))
+                timeout = options.timeout if hasattr(options, "timeout") else None
+                return asyncio.run(compose.stop(services, timeout=timeout))
             elif options.command == "logs":
                 return asyncio.run(compose.logs(services, options.with_context))
             elif options.command == "attach":

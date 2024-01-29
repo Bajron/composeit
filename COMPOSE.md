@@ -6,7 +6,7 @@ Commandline and schema lists are prefixed with a checkbox that serves as a TODO 
 This way features that potentially make sense are signalled and tracked.
 
 ## build
-There is no docker image to build.
+
 This option is reused to provide a way to prepare the process to run.
 
 Commandline arguments:
@@ -57,6 +57,15 @@ See `build` which prepares the process to run.
 
 ## down
 
+Stops services and triggers `clean` section for each service.
+
+Commandline arguments:
+* `[x]` `--timeout|-t` - shutdown timeout in seconds.
+
+Service keys:
+* `[x]` `clean`
+
+Clean section works just like `build` section but it is executed after shutting down a service.
 
 ## start
 

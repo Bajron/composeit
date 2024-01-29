@@ -476,10 +476,12 @@ class AsyncProcess:
         worst_rc = 0
         if "clean" in self.service_config:
             c = self.service_config["clean"]
+            env = get_environemnt(c, self.log)
+
             if "shell_sequence" in c:
                 self.log.debug("Processing cleanup sequence")
                 for cmd in c["shell_sequence"]:
-                    rc = await self.execute_command(cmd)
+                    rc = await self.execute_command(cmd, env=env)
                     if rc != 0 and worst_rc == 0:
                         worst_rc = rc
                         # We continue to cleanup as much as possible

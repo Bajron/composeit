@@ -101,7 +101,9 @@ class Compose:
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
 
-    def _parse_service_config(self, check_consistency=True, interpolate=True, normalize=True, resolve_paths=True):
+    def _parse_service_config(
+        self, check_consistency=True, interpolate=True, normalize=True, resolve_paths=True
+    ):
         parsed_files = [
             yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.service_files
         ]
@@ -200,21 +202,23 @@ class Compose:
 
         return run_client_commands
 
-    async def down(self, services=None):
+    async def down(self, services=None, timeout=None):
         server_up = await self.check_server_is_running()
         if server_up:
-            await self.stop(services=services, request_clean=True, server_up=server_up)
+            await self.stop(
+                services=services, request_clean=True, server_up=server_up, timeout=timeout
+            )
         else:
             await self.watch_services(
                 services, start_server=False, execute=False, execute_build=False, execute_clean=True
             )
 
-    async def stop(self, services=None, request_clean=False, server_up=None):
+    async def stop(self, services=None, request_clean=False, server_up=None, timeout=None):
         if server_up is None:
             server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_stop_session(services, request_clean))
+            await self.run_client_session(self.make_stop_session(services, request_clean, timeout))
         else:
             self.logger.error("Server is not running")
 
@@ -223,7 +227,7 @@ class Compose:
             name for name, service in self.services.items() if service.restart_policy == "always"
         ]
 
-    def make_stop_session(self, services=None, request_clean=False):
+    def make_stop_session(self, services=None, request_clean=False, timeout=None):
         async def run_client_commands(session: aiohttp.ClientSession):
             response = await session.get(f"/")
             data = await response.json()
@@ -240,16 +244,33 @@ class Compose:
                         continue
 
                     self.logger.debug(f"Stopping /{project}/{service}")
-                    response = await session.post(
+                    request = lambda: session.post(
                         f"/{project}/{service}/stop",
                         json={"request_clean": request_clean},
                     )
+
+                    try:
+                        response = await asyncio.wait_for(
+                            request(),
+                            timeout=timeout,
+                        )
+                    except asyncio.exceptions.TimeoutError:
+                        self.logger.warning(f"Stopping {service} timed out after {timeout}")
+                        response = await request()
+
                     if response.status == 200:
                         print(service, await response.json())
             else:
-                response = await session.post(
+                request = lambda: session.post(
                     f"/{project}/stop", json={"request_clean": request_clean}
                 )
+
+                try:
+                    response = await asyncio.wait_for(request(), timeout=timeout)
+                except asyncio.exceptions.TimeoutError:
+                    self.logger.warning(f"Stopping {project} timed out after {timeout}")
+                    response = await request()
+
                 if response.status == 200:
                     print(project, await response.json())
 
