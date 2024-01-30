@@ -49,6 +49,10 @@ signals there is no actual implementation of the feature (using the option makes
 This is indeed leaking the implementation details.
 Now you know what DOES NOT take place and how experimental/in progress this software is.
 
+## ~~cp~~
+
+Not implemented. Not applicable.
+
 ## create
 
 `create` does not make sense as there is no image -> container separation.
@@ -66,6 +70,35 @@ Service keys:
 * `[x]` `clean`
 
 Clean section works just like `build` section but it is executed after shutting down a service.
+
+## _events_
+
+Not implemented.
+
+Perhaps could be adapted to stream services statuses with the ad hoc daemon.
+
+## ~~exec~~
+
+Not implemented. Not applicable.
+
+Without dockers it would result in a possibility to exec anything in the machine exposing the ad hoc daemon.
+Big no-no for security reasons. This tool is not about executing arbitrary commands, but a set of defined applications.
+
+## images
+
+Lists processes paths used to start a service.
+
+Note that for services defined with `shell: true` you get simply a `<shell>` string.
+It is a shell provided by the Python [`subprocess` module](https://docs.python.org/3/library/subprocess.html).
+
+For regular process calls (`shell: false`) the binary is always resolved with `shutil.which`.
+Note that this resulution happens in the main script context.
+Environment variables specified for certain services does not matter for the lookup.
+
+Note that the path resolution might depend on the `build`/`clean` command execution sequence or your virtual environment.
+
+See the warning in https://docs.python.org/3/library/subprocess.html#subprocess.Popen
+and https://docs.python.org/3/library/shutil.html#shutil.which
 
 ## start
 

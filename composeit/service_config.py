@@ -1,10 +1,11 @@
 import signal
 import logging
 import os
+import shutil
 import dotenv
 import io
 from .utils import update_dict
-from typing import Union, List, Optional, Dict
+from typing import Union, List, Optional, Dict, overload
 
 
 def get_stop_signal(config: dict) -> signal.Signals:
@@ -45,11 +46,11 @@ def get_shared_logging_config(services_config: dict):
 
 
 def get_command(
-    service_config: dict, logger: Optional[logging.Logger] = None
+    service_config: dict, logger: Optional[Union[logging.Logger, logging.LoggerAdapter]] = None
 ) -> Union[str, List[str]]:
+    """Gets command from a config. Shell command is always a string, regular call is always a list."""
     config = service_config
     if config.get("shell", False):
-        # TODO, injections?
         if "args" in config and logger is not None:
             logger.warning("args ignored with a shell command")
         command = config["command"]
@@ -62,6 +63,40 @@ def get_command(
         # We can get ints from YAML parsing here, so make everything a string
         # TODO: is it a problem if we get recursive list here or a map even?
         return [f"{c}" for c in command]
+
+
+@overload
+def resolve_command(command: str) -> str: ...
+
+
+@overload
+def resolve_command(command: List[str]) -> List[str]: ...
+
+
+def resolve_command(command: Union[str, List[str]]):
+    if isinstance(command, list):
+        # This way we have a predetermined application lookup
+        # See the warning in https://docs.python.org/3/library/subprocess.html#subprocess.Popen
+        # and https://docs.python.org/3/library/shutil.html#shutil.which
+
+        command = command.copy()
+        resolved = shutil.which(command[0])
+        if resolved is not None:
+            command[0] = resolved
+    return command
+
+
+def get_process_path(resolved_command: Union[str, List[str]]) -> str:
+    if isinstance(resolved_command, str):
+        # We could replicate Python behavior to find shell, but it may change for certain versions...
+        # For example in 3.12 it changes for Windows.
+        # It stays simply "shell" to signal its vagueness and discourage usage.
+        return f"<shell>"
+    elif isinstance(resolved_command, list):
+        return resolved_command[0]
+
+    assert False, "resolved command must be a list or str"
+    return f"<unknown>"
 
 
 def get_environemnt(

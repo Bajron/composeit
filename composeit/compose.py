@@ -22,7 +22,12 @@ from .log_utils import (
     print_message_prefixed,
     print_color_message_prefixed,
 )
-from .service_config import get_shared_logging_config, get_command
+from .service_config import (
+    get_shared_logging_config,
+    get_command,
+    get_process_path,
+    resolve_command,
+)
 from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
@@ -324,9 +329,7 @@ class Compose:
                 print_function = (
                     print_message
                     if single_service_provided
-                    else print_color_message_prefixed
-                    if self.use_colors
-                    else print_message_prefixed
+                    else print_color_message_prefixed if self.use_colors else print_message_prefixed
                 )
 
                 try:
@@ -400,6 +403,64 @@ class Compose:
                     self.logger.debug("Attach cancelled")
 
         return client_session
+
+    async def images(self, services: Optional[List[str]] = None):
+        server_up = await self.check_server_is_running()
+
+        if server_up:
+            await self.run_client_session(self.make_images_session(services))
+        else:
+            self.logger.warning("Server is not running")
+            self.assure_service_config()
+            assert self.service_config is not None
+            services_info = [
+                {
+                    "name": name,
+                    "image": get_process_path(resolve_command(get_command(s, self.logger))),
+                    "sequence": i,
+                }
+                for i, (name, s) in enumerate(self.service_config["services"].items())
+            ]
+            self.show_images(self.working_directory, self.project_name, services_info)
+
+    def make_images_session(self, services: Optional[List[str]] = None):
+        async def client_session(session: aiohttp.ClientSession):
+            async with session.get(f"/") as response:
+                compose_data = await response.json()
+                project = compose_data["project_name"]
+                working_directory = compose_data["working_directory"]
+
+            nonlocal services
+            if services is None:
+                async with session.get(f"/{project}") as response:
+                    project_data = await response.json()
+                    services = project_data["services"]
+
+            service_data = []
+            for s in services:
+                async with session.get(f"/{project}/{s}") as response:
+                    service_data.append(await response.json())
+
+            self.show_images(working_directory, project, service_data)
+
+        return client_session
+
+    def show_images(self, working_directory, project, service_data):
+        service_data.sort(key=lambda x: x["sequence"])
+
+        header = [
+            ("name", "NAME", 20),
+            ("image", "IMAGE", 60),
+        ]
+        fmt = ""
+        for n, _, w in header:
+            fmt += f"{{{n}:{w}}} "
+        self.logger.debug(f"Format is '{fmt}'")
+
+        print(f"Project: {project}, in {working_directory}")
+        print(fmt.format(**{k: v for k, v, _ in header}))
+        for row in service_data:
+            print(fmt.format(**row))
 
     async def ps(self, services: Optional[List[str]] = None):
         server_up = await self.check_server_is_running()
@@ -619,6 +680,7 @@ class Compose:
             "stop_time": s.stop_time,
             "pid": s.process.pid if s.process is not None else None,
             "command": s.command,
+            "image": s.get_process_image(),
             "return_code": s.rc,
             "pobject": s.popen_kw,
             "config": s.service_config,

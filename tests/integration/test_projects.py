@@ -46,7 +46,9 @@ def test_diagnostic_on_side(process_cleaner):
 
         top_output = subprocess.check_output(["composeit", "top"], cwd=service_directory)
         top_lines = [l.decode().strip() for l in io.BytesIO(top_output).readlines()]
-        assert len(top_lines) == (header_lines + services)
+        # There might be more processes due to Python delegating binaries on Windows
+        # For example Python from virtual env opens the global Python
+        assert len(top_lines) >= (header_lines + services)
         assert top_lines[0].startswith("Project: simple")
         for top in top_lines[header_lines:]:
             assert "python" in top

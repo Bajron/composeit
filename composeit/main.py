@@ -70,6 +70,9 @@ def main():
     )
     parser_build.add_argument("service", nargs="*", help="Specific service to build")
 
+    parser_build = subparsers.add_parser("images", help="Lookup the process executables")
+    parser_build.add_argument("service", nargs="*", help="Specific service to inspect")
+
     parser_down = subparsers.add_parser("down", help="Close and cleanup the services")
     parser_down.add_argument("service", nargs="*", help="Specific service to cleanup")
     parser_down.add_argument("--timeout", "-t", type=float, help="Timeout for shutdown in seconds")
@@ -266,6 +269,8 @@ def main():
                 return asyncio.run(compose.start(services))
             elif options.command == "build":
                 return asyncio.run(compose.build(services))
+            elif options.command == "images":
+                return asyncio.run(compose.images(services))
             elif options.command == "down":
                 timeout = options.timeout if hasattr(options, "timeout") else None
                 return asyncio.run(compose.down(services, timeout=timeout))
@@ -318,8 +323,10 @@ def process_config_option(compose: Compose, options):
     if options.quiet:
         return
 
-    with open(options.output, "w") if options.output is not None else open(
-        sys.stdout.fileno(), "w", closefd=False
+    with (
+        open(options.output, "w")
+        if options.output is not None
+        else open(sys.stdout.fileno(), "w", closefd=False)
     ) as stream:
         if options.services:
             for s in compose.service_config["services"].keys():

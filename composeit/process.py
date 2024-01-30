@@ -11,6 +11,9 @@ from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
 from .log_utils import LogKeeper
 from .service_config import (
+    get_command,
+    resolve_command,
+    get_process_path,
     get_stop_signal,
     get_stop_grace_period,
     get_environemnt,
@@ -48,39 +51,6 @@ class AsyncProcess:
         self.sequence: int = sequence
         self.name: str = name
         self.service_config: dict = service_config
-
-        self.execute: bool = execute
-        self.execute_build: bool = execute_build
-        self.execute_clean: bool = execute_clean
-
-        self.build_time: Optional[float] = None
-
-        self.startup_semaphore = asyncio.Semaphore(0)
-        self.process_initialization: Optional[Coroutine] = None
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self.process_wait: Optional[asyncio.Task] = None
-        self.command: Union[str, List[str]] = self._get_command()
-        self.start_time: Optional[float] = None
-        self.stop_time: Optional[float] = None
-        self.watch_coro: Optional[asyncio.Future] = None
-        self.sleep_task: Optional[asyncio.Task] = None
-
-        self.preferred_encoding = locale.getpreferredencoding(False)
-
-        self.build_args: Dict[str, str] = build_args or {}
-
-        # NOTE: YAML translates `no` to False
-        self.restart_policy = service_config.get("restart", "no") or "no"
-        assert (
-            self.restart_policy in RestartPolicyOptions
-        ), f"restart value must be in {RestartPolicyOptions}, recieved {self.restart_policy}"
-
-        self.restart_policy_config: dict = {
-            "delay": 5,
-            "max_attempts": "infinite",
-            "window": 0,
-        }
-        self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
         self.color: Optional[str] = color
 
@@ -131,6 +101,45 @@ class AsyncProcess:
         self._lerr.addHandler(streamHandler)
         self._lerr.addHandler(self.lerr_keeper)
         self._lerr.propagate = False
+
+        self.execute: bool = execute
+        self.execute_build: bool = execute_build
+        self.execute_clean: bool = execute_clean
+
+        self.build_time: Optional[float] = None
+
+        self.startup_semaphore = asyncio.Semaphore(0)
+        self.process_initialization: Optional[Coroutine] = None
+        self.process: Optional[asyncio.subprocess.Process] = None
+        self.process_wait: Optional[asyncio.Task] = None
+
+        self.command: Union[str, List[str]] = self._get_command()
+        """Command prepared from the config (considers "shell", argument lists, etc.)"""
+
+        self.command_executed: Optional[Union[str, List[str]]] = None
+        """Command prepared to run (after image lookup)"""
+
+        self.start_time: Optional[float] = None
+        self.stop_time: Optional[float] = None
+        self.watch_coro: Optional[asyncio.Future] = None
+        self.sleep_task: Optional[asyncio.Task] = None
+
+        self.preferred_encoding = locale.getpreferredencoding(False)
+
+        self.build_args: Dict[str, str] = build_args or {}
+
+        # NOTE: YAML translates `no` to False
+        self.restart_policy = service_config.get("restart", "no") or "no"
+        assert (
+            self.restart_policy in RestartPolicyOptions
+        ), f"restart value must be in {RestartPolicyOptions}, recieved {self.restart_policy}"
+
+        self.restart_policy_config: dict = {
+            "delay": 5,
+            "max_attempts": "infinite",
+            "window": 0,
+        }
+        self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
         self.popen_kw: Dict[str, Any] = {}
 
@@ -220,23 +229,16 @@ class AsyncProcess:
         self._lerr.removeHandler(handler)
 
     def _get_command(self) -> Union[str, List[str]]:
-        config = self.service_config
-        if config.get("shell", False):
-            # TODO, injections?
-            if "args" in config:
-                self.log.warning("args ignored with a shell command")
-            command = config["command"]
-            if not isinstance(command, str):
-                raise TypeError("Expected string for a command in shell mode")
-            return command
+        return get_command(self.service_config, self.log)
+
+    def get_process_image(self) -> str:
+        """Return informative string about the process image"""
+        if self.command_executed is not None:
+            command_executed = self.command_executed
         else:
-            command = (
-                config["command"] if isinstance(config["command"], list) else [config["command"]]
-            )
-            command.extend(config.get("args", []))
-            # We can get ints from YAML parsing here, so make everything a string
-            # TODO: is it a problem if we get recursive list here or a map even?
-            return [f"{c}" for c in command]
+            command_executed = resolve_command(self._get_command())
+
+        return get_process_path(command_executed)
 
     async def _make_process(self):
         service_config = self.service_config
@@ -275,17 +277,19 @@ class AsyncProcess:
         self.command = self._get_command()
         if service_config.get("shell", False):
             assert isinstance(self.command, str)
+            self.command_executed = self.command
             process = await asyncio.create_subprocess_shell(
-                cmd=self.command,
+                cmd=self.command_executed,
                 stdin=stdin,
                 stderr=stream_mode,
                 stdout=stream_mode,
                 **popen_kw,
             )
         else:
-            assert isinstance(self.command, list)
+            assert isinstance(self.command, list) and len(self.command) > 0
+            self.command_executed = resolve_command(self.command)
             process = await asyncio.create_subprocess_exec(
-                *self.command,
+                *self.command_executed,
                 stdin=stdin,
                 stderr=stream_mode,
                 stdout=stream_mode,
@@ -524,6 +528,7 @@ class AsyncProcess:
     async def _start_process(self):
         self.rc = None
         self.process = None
+        self.command_executed = None
         self.start_time = None
         self.stop_time = None
         self.process_initialization = self._make_process()

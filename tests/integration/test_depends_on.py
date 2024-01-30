@@ -17,7 +17,7 @@ def test_dependencies(process_cleaner):
         states = ps(service_directory)
         assert all(map(lambda x: x == "up", states.values()))
         top_lines = top(service_directory)
-        assert len(top_lines) == 3
+        assert len(top_lines) >= 3
 
         # Just close independent service
         subprocess.check_output(["composeit", "stop", "leaf"], cwd=service_directory)
@@ -27,7 +27,7 @@ def test_dependencies(process_cleaner):
         assert states["root"] == "up"
 
         top_lines = top(service_directory)
-        assert len(top_lines) == 2
+        assert len(top_lines) >= 2
 
         # Close crucial service, the other one that depends on it should close too
         subprocess.check_output(["composeit", "stop", "root"], cwd=service_directory)
@@ -47,7 +47,7 @@ def test_dependencies(process_cleaner):
         assert states["root"] == "up"
 
         top_lines = top(service_directory)
-        assert len(top_lines) == 3
+        assert len(top_lines) >= 3
 
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
