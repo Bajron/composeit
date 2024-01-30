@@ -13,7 +13,7 @@ import copy
 import time
 from aiohttp import web, ClientConnectorError, ClientResponseError
 from json.decoder import JSONDecodeError
-
+from .service_config import get_signal, get_default_kill
 from typing import List, Dict, Optional, Union, Iterable, Mapping
 
 from .log_utils import (
@@ -227,11 +227,6 @@ class Compose:
         else:
             self.logger.error("Server is not running")
 
-    def get_always_restart_services(self):
-        return [
-            name for name, service in self.services.items() if service.restart_policy == "always"
-        ]
-
     def make_stop_session(self, services=None, request_clean=False, timeout=None):
         async def run_client_commands(session: aiohttp.ClientSession):
             response = await session.get(f"/")
@@ -279,6 +274,51 @@ class Compose:
                 if response.status == 200:
                     print(project, await response.json())
 
+            return response
+
+        return run_client_commands
+
+    async def kill(self, services=None, signal=9):
+        server_up = await self.check_server_is_running()
+        if server_up:
+            await self.run_client_session(self.make_kill_session(services, signal))
+        else:
+            self.logger.error("Server is not running")
+
+    def make_kill_session(self, services=None, signal=9):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            response = await session.get(f"/")
+            data = await response.json()
+            project = data["project_name"]
+
+            response = await session.get(f"/{project}")
+            data = await response.json()
+            existing_services = data["services"]
+
+            if services is not None:
+                for service in services:
+                    if service not in existing_services:
+                        self.logger.warning(f"{service} does not exist on the server, skipping")
+                        continue
+
+                    self.logger.debug(f"Kill {signal} to /{project}/{service}")
+                    response = await session.post(
+                        f"/{project}/{service}/kill",
+                        json={"signal": signal},
+                        raise_for_status=False,
+                    )
+            else:
+                self.logger.debug(f"Kill {signal} to /{project}")
+                response = await session.post(
+                    f"/{project}/kill",
+                    json={"signal": signal},
+                    raise_for_status=False,
+                )
+
+            if response.status >= 500:
+                response.raise_for_status()
+
+            print(project, await response.json())
             return response
 
         return run_client_commands
@@ -649,11 +689,7 @@ class Compose:
 
     async def post_stop_project(self, request: web.Request):
         self._get_project(request)
-
-        try:
-            body = await request.json()
-        except JSONDecodeError:
-            body = {}
+        body = await self._get_json_or_empty(request)
         request_clean = body.get("request_clean", False)
 
         await self.shutdown(request_clean=request_clean)
@@ -664,6 +700,13 @@ class Compose:
         if service not in self.services.keys():
             raise web.HTTPNotFound(reason="Service not found")
         return service
+
+    async def _get_json_or_empty(self, request: web.Request):
+        try:
+            body = await request.json()
+        except JSONDecodeError:
+            body = {}
+        return body
 
     async def get_project(self, request: web.Request):
         self._get_project(request)
@@ -828,10 +871,7 @@ class Compose:
     async def post_stop_service(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
-        try:
-            body = await request.json()
-        except JSONDecodeError:
-            body = {}
+        body = await self._get_json_or_empty(request)
         request_clean = body.get("request_clean", False)
         for s in self.get_stop_sequence([service]):
             if request_clean:
@@ -839,13 +879,39 @@ class Compose:
             await self.services[s].stop()
         return web.json_response("Stopped")
 
+    async def post_kill_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        body = await self._get_json_or_empty(request)
+        s = get_signal(body.get("signal", get_default_kill()))
+        try:
+            await self.services[service].kill(s)
+            return web.json_response("Killed")
+        except ValueError as ex:
+            self.logger.warning(f"ValueError: {ex}")
+            return web.json_response(f"ValueError", status=400)
+        except ProcessLookupError as ex:
+            self.logger.warning(f"ProcessLookupError: {ex}")
+            return web.json_response(f"ProcessLookupError", status=400)
+
+    async def post_kill_project(self, request: web.Request):
+        self._get_project(request)
+        body = await self._get_json_or_empty(request)
+        s = get_signal(body.get("signal", get_default_kill()))
+        try:
+            await asyncio.gather(*[service.kill(s) for service in self.services.values()])
+            return web.json_response("Killed")
+        except ValueError as ex:
+            self.logger.warning(f"ValueError: {ex}")
+            return web.json_response(f"ValueError", status=400)
+        except ProcessLookupError as ex:
+            self.logger.warning(f"ProcessLookupError: {ex}")
+            return web.json_response(f"ProcessLookupError", status=400)
+
     async def post_start_service(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
-        try:
-            body = await request.json()
-        except JSONDecodeError:
-            body = {}
+        body = await self._get_json_or_empty(request)
         request_build = body.get("request_build", False)
         for s in self.get_start_sequence([service]):
             if request_build:
@@ -868,6 +934,8 @@ class Compose:
                 web.post("/{project}/{service}/stop", self.post_stop_service),
                 web.post("/{project}/{service}/start", self.post_start_service),
                 web.get("/{project}/{service}/top", self.get_service_processes),
+                web.post("/{project}/{service}/kill", self.post_kill_service),
+                web.post("/{project}/kill", self.post_kill_project),
             ]
         )
 
@@ -966,6 +1034,11 @@ class Compose:
             await asyncio.sleep(0.001)
         if self.app is not None:
             await self.app.shutdown()
+
+    def get_always_restart_services(self):
+        return [
+            name for name, service in self.services.items() if service.restart_policy == "always"
+        ]
 
     async def run_client_session(self, session_function):
         try:

@@ -100,6 +100,21 @@ Note that the path resolution might depend on the `build`/`clean` command execut
 See the warning in https://docs.python.org/3/library/subprocess.html#subprocess.Popen
 and https://docs.python.org/3/library/shutil.html#shutil.which
 
+## kill
+
+Sends a signal to services.
+
+Commandline arguments:
+* `[x]` `--signal|-s` Signal to send, by default SIGKILL
+
+Note that this option is independent from the service option `stop_signal`.
+
+Note that this is very low level feature and does not handle child processes.
+Only the top level process of a service receives the signal.
+If you want to stop the service use `stop` (second `stop` triggers forced kill).
+
+Available signals depend on Python implementation.
+
 ## start
 
 ## up

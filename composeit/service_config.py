@@ -10,14 +10,27 @@ from typing import Union, List, Optional, Dict, overload
 
 def get_stop_signal(config: dict) -> signal.Signals:
     s = config.get("stop_signal", signal.SIGTERM)
+    return get_signal(s)
+
+
+def get_signal(s: Union[int, str, signal.Signals]) -> signal.Signals:
     if isinstance(s, int):
-        s = signal.Signals(s)
-    if isinstance(s, str):
+        sig = signal.Signals(s)
+    elif isinstance(s, str):
         if hasattr(signal.Signals, s):
-            s = getattr(signal.Signals, s)
+            sig = getattr(signal.Signals, s)
         else:
-            raise ValueError(f"Unknown signal {s}")
-    return s
+            try:
+                sig = signal.Signals(int(s))
+            except:
+                raise ValueError(f"Unknown signal {s}")
+    else:
+        sig = s
+    return sig
+
+
+def get_default_kill() -> signal.Signals:
+    return get_signal("SIGTERM" if os.name == "nt" else "SIGKILL")
 
 
 def get_stop_grace_period(config: dict) -> float:
@@ -99,7 +112,7 @@ def get_process_path(resolved_command: Union[str, List[str]]) -> str:
     return f"<unknown>"
 
 
-def get_environemnt(
+def get_environment(
     config: dict, logger: Union[logging.Logger, logging.LoggerAdapter]
 ) -> Optional[Dict[str, str]]:
     """Extracts environment options from a dictionary

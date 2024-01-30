@@ -5,6 +5,7 @@ import psutil
 import os
 import locale
 import sys
+import signal
 import subprocess
 import time
 from termcolor import colored
@@ -16,7 +17,7 @@ from .service_config import (
     get_process_path,
     get_stop_signal,
     get_stop_grace_period,
-    get_environemnt,
+    get_environment,
 )
 
 from typing import List, Optional, Union, Dict, Any, Coroutine
@@ -243,7 +244,7 @@ class AsyncProcess:
     async def _make_process(self):
         service_config = self.service_config
 
-        env = get_environemnt(service_config, self.log)
+        env = get_environment(service_config, self.log)
 
         stream_mode = asyncio.subprocess.PIPE
         if "logging" in service_config:
@@ -446,7 +447,7 @@ class AsyncProcess:
     async def _build(self):
         if "build" in self.service_config:
             b = self.service_config["build"]
-            env = get_environemnt(b, self.log)
+            env = get_environment(b, self.log)
 
             if self.build_args:
                 if env is None:
@@ -480,7 +481,7 @@ class AsyncProcess:
         worst_rc = 0
         if "clean" in self.service_config:
             c = self.service_config["clean"]
-            env = get_environemnt(c, self.log)
+            env = get_environment(c, self.log)
 
             if "shell_sequence" in c:
                 self.log.debug("Processing cleanup sequence")
@@ -687,3 +688,9 @@ class AsyncProcess:
             self.log.debug("Sending terminate signal for terminate")
             await self._terminate()
         self.startup_semaphore.release()
+
+    async def kill(self, signal):
+        assert self.process is not None
+        self.log.debug(f"Sending signal {signal}")
+        # TODO: children?
+        self.process.send_signal(signal)

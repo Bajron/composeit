@@ -10,7 +10,7 @@ from typing import Dict
 
 from .compose import Compose
 from .utils import get_stack_string
-from .service_config import get_dict_from_env_list
+from .service_config import get_dict_from_env_list, get_signal, get_default_kill
 
 
 def main():
@@ -80,6 +80,16 @@ def main():
     parser_stop = subparsers.add_parser("stop", help="Close the services")
     parser_stop.add_argument("service", nargs="*", help="Specific service to close")
     parser_stop.add_argument("--timeout", "-t", type=float, help="Timeout for shutdown in seconds")
+
+    parser_kill = subparsers.add_parser("kill", help="Send a signal to services")
+    parser_kill.add_argument("service", nargs="*", help="Specific service to send the signal to")
+    parser_kill.add_argument(
+        "--signal",
+        "-s",
+        type=get_signal,
+        default=get_default_kill(),
+        help="Signal to send",
+    )
 
     parser_logs = subparsers.add_parser("logs", help="Show logs from the services")
     parser_logs.add_argument("service", nargs="*", help="Specific services to show logs from")
@@ -277,6 +287,8 @@ def main():
             elif options.command == "stop":
                 timeout = options.timeout if hasattr(options, "timeout") else None
                 return asyncio.run(compose.stop(services, timeout=timeout))
+            elif options.command == "kill":
+                return asyncio.run(compose.kill(services, signal=options.signal))
             elif options.command == "logs":
                 return asyncio.run(compose.logs(services, options.with_context))
             elif options.command == "attach":
