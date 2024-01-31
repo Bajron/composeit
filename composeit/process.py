@@ -81,9 +81,9 @@ class AsyncProcess:
         self.lerr: logging.LoggerAdapter = self._adapt_logger(self._lerr)
         self.log: logging.LoggerAdapter = self._adapt_logger(self._log)
 
-        self.lout_keeper = LogKeeper()
-        self.lerr_keeper = LogKeeper()
-        self.log_keeper = LogKeeper()
+        self.lout_keeper = LogKeeper(window=30)
+        self.lerr_keeper = LogKeeper(window=30)
+        self.log_keeper = LogKeeper(window=30)
 
         logHandler = logging.StreamHandler(stream=sys.stderr)
         logHandler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))

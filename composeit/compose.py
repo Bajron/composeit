@@ -323,22 +323,30 @@ class Compose:
 
         return run_client_commands
 
-    async def logs(self, services: Optional[List[str]] = None, context: bool = False):
+    async def logs(
+        self, services: Optional[List[str]] = None, context: bool = False, follow: bool = False
+    ):
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_logs_session(services, context))
+            await self.run_client_session(self.make_logs_session(services, context, follow))
         else:
             self.logger.error("Server is not running")
 
-    def make_logs_session(self, services: Optional[List[str]] = None, context: bool = False):
+    def make_logs_session(
+        self, services: Optional[List[str]] = None, context: bool = False, follow: bool = False
+    ):
         async def stream_logs_response(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 data = await response.json()
                 project = data["project_name"]
 
             def logs_request():
-                params = [("format", "json"), ("context", "on" if context else "no")]
+                params = [
+                    ("format", "json"),
+                    ("context", "on" if context else "no"),
+                    ("follow", "on" if follow else "no"),
+                ]
                 if services is not None and len(services) == 1:
                     service = services[0]
                     return session.get(
@@ -369,7 +377,9 @@ class Compose:
                 print_function = (
                     print_message
                     if single_service_provided
-                    else print_color_message_prefixed if self.use_colors else print_message_prefixed
+                    else print_color_message_prefixed
+                    if self.use_colors
+                    else print_message_prefixed
                 )
 
                 try:
@@ -794,6 +804,7 @@ class Compose:
 
         response_format: str = request.query.get("format", "text")
         add_context: bool = request.query.get("context", "no") == "on"
+        follow: bool = request.query.get("follow", "no") == "on"
 
         process = self.services[service]
         back_stream = ResponseAdapter(response)
@@ -813,7 +824,7 @@ class Compose:
 
         try:
             # TODO: cleaner solution? websocket here?
-            while not await back_stream.is_broken() and not process.terminated_and_done:
+            while follow and not await back_stream.is_broken() and not process.terminated_and_done:
                 await asyncio.sleep(1)
         finally:
             self.logger.debug("Closing logs request")
@@ -832,6 +843,7 @@ class Compose:
 
         response_format: str = request.query.get("format", "text")
         add_context: bool = request.query.get("context", "no") == "on"
+        follow: bool = request.query.get("follow", "no") == "on"
 
         response = web.StreamResponse()
         response.enable_chunked_encoding()
@@ -855,8 +867,10 @@ class Compose:
 
         try:
             # TODO: cleaner solution? websocket here?
-            while not await back_stream.is_broken() and not all(
-                [self.services[s].terminated_and_done for s in services]
+            while (
+                follow
+                and not await back_stream.is_broken()
+                and not all([self.services[s].terminated_and_done for s in services])
             ):
                 await asyncio.sleep(1)
         finally:

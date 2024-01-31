@@ -96,6 +96,12 @@ def main():
     parser_logs.add_argument(
         "--with-context", default=False, action="store_true", help="Show previous logs context"
     )
+    # TODO correct the default (just for back compatibility set to True)
+    parser_logs.add_argument(
+        "--follow", "-f", default=True, action="store_true", help="Follow the logs"
+    )
+
+
     parser_logs.add_argument(
         "--no-context",
         dest="with_context",
@@ -290,7 +296,7 @@ def main():
             elif options.command == "kill":
                 return asyncio.run(compose.kill(services, signal=options.signal))
             elif options.command == "logs":
-                return asyncio.run(compose.logs(services, options.with_context))
+                return asyncio.run(compose.logs(services, options.with_context, options.follow))
             elif options.command == "attach":
                 assert services is not None and len(services) == 1
                 return asyncio.run(compose.attach(services[0], options.with_context))

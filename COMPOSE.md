@@ -115,6 +115,33 @@ If you want to stop the service use `stop` (second `stop` triggers forced kill).
 
 Available signals depend on Python implementation.
 
+## logs
+
+Show logs from the services.
+Only certain window of recent logs is stored for each process.
+There are no advanced logging storage drivers.
+
+Commandline arguments:
+* `[ ]` `--follow|-f` TODO: this is actually default now
+* `[x]` `--with-context` - TODO: should this be the default, and --tail for context?
+* `[ ]` `--no-color`
+* `[ ]` `--no-log-prefix`
+* `[ ]` `--since`
+* `[ ]` `--tail|-n`
+* `[ ]` `--timestamps|-t`
+* `[ ]` `--until`
+
+Service keys:
+* `[x]` `logging`
+    * `[x]` `none` - no logs are gathered for a service
+    * `[ ]` `driver`
+        * `logging.config.dictConfig`
+           uses `config` from `driver` level as the `logging` module config
+        * `logging.config.dictConfig.shared`
+           uses `config` from `driver` level as the `logging` module config;
+           configs are merged into a signle config and applied,
+           so handlers etc. can be referenced across services
+
 ## start
 
 ## up
