@@ -1,6 +1,7 @@
 import yaml
 import json
 import asyncio
+import datetime
 import signal
 import os
 import logging
@@ -324,17 +325,29 @@ class Compose:
         return run_client_commands
 
     async def logs(
-        self, services: Optional[List[str]] = None, context: bool = False, follow: bool = False
+        self,
+        services: Optional[List[str]] = None,
+        context: bool = False,
+        follow: bool = False,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
     ):
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_logs_session(services, context, follow))
+            await self.run_client_session(
+                self.make_logs_session(services, context, follow, since, until)
+            )
         else:
             self.logger.error("Server is not running")
 
     def make_logs_session(
-        self, services: Optional[List[str]] = None, context: bool = False, follow: bool = False
+        self,
+        services: Optional[List[str]] = None,
+        context: bool = False,
+        follow: bool = False,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
     ):
         async def stream_logs_response(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
@@ -347,6 +360,11 @@ class Compose:
                     ("context", "on" if context else "no"),
                     ("follow", "on" if follow else "no"),
                 ]
+                if since is not None:
+                    params.append(("since", since.isoformat()))
+                if until is not None:
+                    params.append(("until", until.isoformat()))
+
                 if services is not None and len(services) == 1:
                     service = services[0]
                     return session.get(
@@ -805,6 +823,8 @@ class Compose:
         response_format: str = request.query.get("format", "text")
         add_context: bool = request.query.get("context", "no") == "on"
         follow: bool = request.query.get("follow", "no") == "on"
+        # TODO handle since/until
+        # TODO refactor with get_services_logs
 
         process = self.services[service]
         back_stream = ResponseAdapter(response)
@@ -844,6 +864,7 @@ class Compose:
         response_format: str = request.query.get("format", "text")
         add_context: bool = request.query.get("context", "no") == "on"
         follow: bool = request.query.get("follow", "no") == "on"
+        # TODO handle since/until
 
         response = web.StreamResponse()
         response.enable_chunked_encoding()

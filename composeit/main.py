@@ -9,7 +9,7 @@ import asyncio
 from typing import Dict
 
 from .compose import Compose
-from .utils import get_stack_string
+from .utils import get_stack_string, date_or_duration
 from .service_config import get_dict_from_env_list, get_signal, get_default_kill
 
 
@@ -100,14 +100,14 @@ def main():
     parser_logs.add_argument(
         "--follow", "-f", default=True, action="store_true", help="Follow the logs"
     )
-
-
     parser_logs.add_argument(
         "--no-context",
         dest="with_context",
         action="store_false",
         help="Do not show previous logs context",
     )
+    parser_logs.add_argument("--since", type=date_or_duration, help="Only show logs since date")
+    parser_logs.add_argument("--until", type=date_or_duration, help="Only show logs until date")
 
     parser_attach = subparsers.add_parser("attach", help="Attach to a service")
     parser_attach.add_argument("service", nargs=1, help="Specific service to attach to")
@@ -296,7 +296,11 @@ def main():
             elif options.command == "kill":
                 return asyncio.run(compose.kill(services, signal=options.signal))
             elif options.command == "logs":
-                return asyncio.run(compose.logs(services, options.with_context, options.follow))
+                return asyncio.run(
+                    compose.logs(
+                        services, options.with_context, options.follow, options.since, options.until
+                    )
+                )
             elif options.command == "attach":
                 assert services is not None and len(services) == 1
                 return asyncio.run(compose.attach(services[0], options.with_context))

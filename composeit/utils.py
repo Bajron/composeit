@@ -3,8 +3,10 @@ import io
 from time import strftime, localtime
 import datetime
 import traceback
+import re
 import collections.abc
-from typing import Mapping, Dict
+from typing import Mapping, Dict, Union
+
 
 def get_stack_string():
     buffer = io.StringIO()
@@ -12,11 +14,36 @@ def get_stack_string():
     return buffer.getvalue()
 
 
-def duration_to_seconds(duration):
+def date_or_duration(text: str) -> datetime.datetime:
+    try:
+        return datetime.datetime.fromisoformat(text)
+    except:
+        pass
+    return datetime.datetime.fromtimestamp(
+        datetime.datetime.now().timestamp() + duration_to_seconds(text)
+    )
+
+
+def duration_to_seconds(duration: Union[str, int, float]) -> float:
     if isinstance(duration, (int, float)):
         return duration
-    # TODO
-    raise Exception(f"Duration {duration} not handled. Only numbers supported for now")
+
+    input = f"{duration}".lower().strip()
+    negative = input[:1] == "-"
+    if negative:
+        input = input[1:]
+
+    duration_re = re.compile(
+        r"(\s*(?P<count>\d+(\.\d+)?)(?P<unit>(d|h|m|s|day|days|hour|hours|minute|minutes|second|seconds)?))"
+    )
+
+    result = 0.0
+    multiplier = {"s": 1, "m": 60, "h": 60 * 60, "d": 60 * 60 * 24}
+
+    for match in duration_re.findall(input):
+        result += multiplier[(match[3] or "s")[0]] * float(match[1])
+
+    return -result if negative else result
 
 
 def duration_text(seconds):
