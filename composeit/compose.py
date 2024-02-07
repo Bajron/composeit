@@ -395,9 +395,7 @@ class Compose:
                 print_function = (
                     print_message
                     if single_service_provided
-                    else print_color_message_prefixed
-                    if self.use_colors
-                    else print_message_prefixed
+                    else print_color_message_prefixed if self.use_colors else print_message_prefixed
                 )
 
                 try:
@@ -778,16 +776,20 @@ class Compose:
         response = web.WebSocketResponse()
 
         back_stream = WebSocketAdapter(response)
+        await response.prepare(request)
+
         logs_to_response = logging.StreamHandler(back_stream)
         if response_format == "json":
             logs_to_response.setFormatter(JsonFormatter("%(message)s"))
-        self.services[service].attach_log_handler(logs_to_response, add_context)
+
+        if add_context:
+            self.services[service].feed_handler(logs_to_response)
+
+        self.services[service].attach_log_handler(logs_to_response)
 
         def detach_logger(fut):
             self.logger.debug(f"Detaching log sender from {service}")
             self.services[service].detach_log_handler(logs_to_response)
-
-        await response.prepare(request)
 
         assert response.task is not None
         response.task.add_done_callback(detach_logger)
@@ -816,56 +818,31 @@ class Compose:
     async def get_service_logs(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
-        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
-        response = web.StreamResponse()
-        response.enable_chunked_encoding()
 
-        response_format: str = request.query.get("format", "text")
-        add_context: bool = request.query.get("context", "no") == "on"
-        follow: bool = request.query.get("follow", "no") == "on"
-        # TODO handle since/until
-        # TODO refactor with get_services_logs
-
-        process = self.services[service]
-        back_stream = ResponseAdapter(response)
-        logs_to_response = logging.StreamHandler(back_stream)
-        if response_format == "json":
-            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
-        process.attach_log_handler(logs_to_response, add_context)
-
-        def detach_logger(fut):
-            self.logger.debug("Detaching log sender from service")
-            process.detach_log_handler(logs_to_response)
-
-        await response.prepare(request)
-
-        assert response.task is not None
-        response.task.add_done_callback(detach_logger)
-
-        try:
-            # TODO: cleaner solution? websocket here?
-            while follow and not await back_stream.is_broken() and not process.terminated_and_done:
-                await asyncio.sleep(1)
-        finally:
-            self.logger.debug("Closing logs request")
-            try:
-                await response.write_eof()
-            except ConnectionResetError:
-                self.logger.debug("Log connection broken")
-        return response
+        await self._provide_logs_response(request, [service])
 
     async def get_services_logs(self, request: web.Request):
         self._get_project(request)
-
         services: Optional[List[str]] = request.query.getall("service", None)
         if services is None:
             services = list(self.services.keys())
 
+        await self._provide_logs_response(request, services)
+
+    async def _provide_logs_response(self, request: web.Request, services: List[str]):
         response_format: str = request.query.get("format", "text")
         add_context: bool = request.query.get("context", "no") == "on"
         follow: bool = request.query.get("follow", "no") == "on"
+
+        def make_date(s: Optional[str]):
+            return datetime.datetime.fromisoformat(s) if s else None
+
+        since: Optional[datetime.datetime] = make_date(request.query.get("since"))
+        until: Optional[datetime.datetime] = make_date(request.query.get("until"))
+
         # TODO handle since/until
 
+        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
         response = web.StreamResponse()
         response.enable_chunked_encoding()
 
@@ -874,26 +851,36 @@ class Compose:
         if response_format == "json":
             logs_to_response.setFormatter(JsonFormatter("%(message)s"))
 
-        for s in services:
-            self.services[s].attach_log_handler(logs_to_response, add_context)
-
-        def detach_loggers(fut):
-            for s in services:
-                self.logger.debug(f"Detaching log sender from {s}")
-                self.services[s].detach_log_handler(logs_to_response)
-
         await response.prepare(request)
-        assert response.task is not None
-        response.task.add_done_callback(detach_loggers)
+
+        now = datetime.datetime.now()
+
+        if add_context or since is not None or (until is not None and until < now):
+            for s in services:
+                self.services[s].feed_handler(logs_to_response, since=since, until=until)
+
+        if follow or until is not None and until > now:
+            for s in services:
+                self.services[s].attach_log_handler(logs_to_response)
+
+            def detach_loggers(fut):
+                for s in services:
+                    self.logger.debug(f"Detaching log sender from {s}")
+                    self.services[s].detach_log_handler(logs_to_response)
+
+            assert response.task is not None
+            response.task.add_done_callback(detach_loggers)
 
         try:
             # TODO: cleaner solution? websocket here?
             while (
-                follow
+                (follow or (until is not None and datetime.datetime.now() < until))
                 and not await back_stream.is_broken()
                 and not all([self.services[s].terminated_and_done for s in services])
             ):
                 await asyncio.sleep(1)
+                if until is not None and datetime.datetime.now() > until:
+                    break
         finally:
             self.logger.debug("Closing log request")
             try:

@@ -5,7 +5,7 @@ import psutil
 import os
 import locale
 import sys
-import signal
+import datetime
 import subprocess
 import time
 from termcolor import colored
@@ -211,13 +211,28 @@ class AsyncProcess:
             else:
                 return "starting"
 
-    def attach_log_handler(self, handler: logging.StreamHandler, provide_context: bool = False):
-        if provide_context:
-            c = self.lerr_keeper.window + self.lout_keeper.window + self.log_keeper.window
-            c.sort(key=lambda x: x.created)
-            for r in c:
-                handler.emit(r)
+    def feed_handler(
+        self,
+        handler: logging.StreamHandler,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
+    ):
+        c = self.lerr_keeper.window + self.lout_keeper.window + self.log_keeper.window
+        if len(c) == 0:
+            return
 
+        c.sort(key=lambda x: x.created)
+
+        since_second: float = since.timestamp() if since is not None else 0
+        until_second: float = until.timestamp() if until is not None else (c[-1].created + 1)
+        for r in c:
+            if r.created < since_second:
+                continue
+            if r.created > until_second:
+                break
+            handler.emit(r)
+
+    def attach_log_handler(self, handler: logging.StreamHandler):
         self.log.debug(f"Logger attached {handler}")
         self._log.addHandler(handler)
         self._lout.addHandler(handler)

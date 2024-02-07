@@ -47,6 +47,10 @@ def duration_to_seconds(duration: Union[str, int, float]) -> float:
 
 
 def duration_text(seconds):
+    sign = ""
+    if seconds < 0:
+        sign = "-"
+        seconds = -seconds
     D = 3600 * 24
     H = 3600
     M = 60
@@ -70,9 +74,9 @@ def duration_text(seconds):
         r.append(f"{s}s")
 
     if len(r) == 0:
-        return f"{round(seconds, 2)}s"
+        return sign + f"{round(seconds, 2)}s"
     else:
-        return " ".join(r)
+        return sign + " ".join(r)
 
 
 def date_time_text(seconds):
