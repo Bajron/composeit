@@ -142,6 +142,36 @@ Service keys:
            configs are merged into a signle config and applied,
            so handlers etc. can be referenced across services
 
+## ~~ls~~
+
+Not applicable. There is no central database/daemon that could be asked for all composeit projects.
+On Windows, the pipe paths could be listed perhaps, but on Linux whole filesystem would be scanned.
+
+This command does not fit the ad hoc nature of the `composeit` daemon.
+
+## _pause_
+
+Not implemented.
+
+Could be implemented in theory... but would be problematic.
+
+## ~~port~~
+
+Not applicable. `port` option is not handled in services YAML specification too.
+
+## ps
+
+Shows the status of services.
+
+Commandline arguments:
+* `[ ]` `--all|-a`
+* `[ ]` `--filter`
+* `[ ]` `--format`
+* `[ ]` `--no-trunc`
+* `[ ]` `--orphans`
+* `[ ]` `--services`
+* `[ ]` `--status`
+
 ## start
 
 ## up
