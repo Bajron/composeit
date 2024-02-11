@@ -88,10 +88,10 @@ def test_diagnostic_on_side(process_cleaner):
         # Diagnosting does not work without server
         # TODO? In theory we could display the services as not started
         ps_done = subprocess.run(["composeit", "ps"], capture_output=True, cwd=service_directory)
-        assert "Server is not running" in ps_done.stderr.decode(errors='replace')
+        assert "Server is not running" in ps_done.stderr.decode(errors="replace")
 
         top_done = subprocess.run(["composeit", "top"], capture_output=True, cwd=service_directory)
-        assert "Server is not running" in top_done.stderr.decode(errors='replace')
+        assert "Server is not running" in top_done.stderr.decode(errors="replace")
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)
@@ -113,7 +113,7 @@ def test_logs_on_side(process_cleaner):
         env["PYTHONUNBUFFERED"] = "1"
 
         log_all = subprocess.Popen(
-            ["composeit", "logs"],
+            ["composeit", "logs", "--follow"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=service_directory,
@@ -122,7 +122,7 @@ def test_logs_on_side(process_cleaner):
         process_cleaner.append(log_all)
 
         log_1 = subprocess.Popen(
-            ["composeit", "logs", "simple1"],
+            ["composeit", "logs", "--follow", "simple1"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=service_directory,
@@ -131,7 +131,7 @@ def test_logs_on_side(process_cleaner):
         process_cleaner.append(log_1)
 
         log_2 = subprocess.Popen(
-            ["composeit", "logs", "simple2"],
+            ["composeit", "logs", "--follow", "simple2"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=service_directory,

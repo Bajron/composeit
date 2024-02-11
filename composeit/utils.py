@@ -5,7 +5,15 @@ import datetime
 import traceback
 import re
 import collections.abc
-from typing import Mapping, Dict, Union
+from typing import Mapping, Dict, Union, Optional
+
+
+def make_int(s: Optional[str]):
+    return int(s) if s else None
+
+
+def make_date(s: Optional[str]):
+    return datetime.datetime.fromisoformat(s) if s else None
 
 
 def get_stack_string():

@@ -19,6 +19,7 @@ from typing import List, Dict, Optional, Union, Iterable, Mapping
 
 from .log_utils import (
     JsonFormatter,
+    build_print_function,
     print_message,
     print_message_prefixed,
     print_color_message_prefixed,
@@ -33,6 +34,8 @@ from .process import AsyncProcess
 from .graph import topological_sequence
 from .web_utils import ResponseAdapter, WebSocketAdapter
 from .utils import (
+    make_int,
+    make_date,
     interpolate_variables,
     duration_text,
     cumulative_time_text,
@@ -327,28 +330,30 @@ class Compose:
     async def logs(
         self,
         services: Optional[List[str]] = None,
-        context: bool = False,
-        follow: bool = False,
-        since: Optional[datetime.datetime] = None,
-        until: Optional[datetime.datetime] = None,
+        **kwargs,
     ):
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(
-                self.make_logs_session(services, context, follow, since, until)
-            )
+            await self.run_client_session(self.make_logs_session(services, **kwargs))
         else:
             self.logger.error("Server is not running")
 
     def make_logs_session(
         self,
         services: Optional[List[str]] = None,
-        context: bool = False,
         follow: bool = False,
+        context: Optional[bool] = None,
         since: Optional[datetime.datetime] = None,
         until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
+        color: Optional[bool] = None,
+        timestamps: Optional[bool] = None,
+        prefix: Optional[bool] = None,
     ):
+        if context is None:
+            context = not follow
+
         async def stream_logs_response(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 data = await response.json()
@@ -364,6 +369,8 @@ class Compose:
                     params.append(("since", since.isoformat()))
                 if until is not None:
                     params.append(("until", until.isoformat()))
+                if tail is not None:
+                    params.append(("tail", f"{tail}"))
 
                 if services is not None and len(services) == 1:
                     service = services[0]
@@ -392,10 +399,11 @@ class Compose:
                 signal.signal(signal.SIGINT, signal_handler)
 
                 single_service_provided = services is not None and len(services) == 1
-                print_function = (
-                    print_message
-                    if single_service_provided
-                    else print_color_message_prefixed if self.use_colors else print_message_prefixed
+                print_function = build_print_function(
+                    single_service_provided,
+                    None if color is None else (self.use_colors and color),
+                    prefix,
+                    timestamps,
                 )
 
                 try:
@@ -587,7 +595,7 @@ class Compose:
             row = {}
             row["name"] = s["name"]
 
-            cmd = " ".join(s["command"])
+            cmd = " ".join(s["command"]) if isinstance(s["command"], list) else s["command"]
             if len(cmd) > 30:
                 cmd = cmd[:27] + "..."
             row["command"] = cmd
@@ -771,6 +779,7 @@ class Compose:
 
         response_format = request.query.get("format", "text")
         add_context: bool = request.query.get("context", "no") == "on"
+        tail: Optional[int] = make_int(request.query.get("tail"))
 
         # https://docs.aiohttp.org/en/stable/web_lowlevel.html
         response = web.WebSocketResponse()
@@ -783,7 +792,7 @@ class Compose:
             logs_to_response.setFormatter(JsonFormatter("%(message)s"))
 
         if add_context:
-            self.services[service].feed_handler(logs_to_response)
+            self.services[service].feed_handler(logs_to_response, tail=tail)
 
         self.services[service].attach_log_handler(logs_to_response)
 
@@ -834,13 +843,9 @@ class Compose:
         add_context: bool = request.query.get("context", "no") == "on"
         follow: bool = request.query.get("follow", "no") == "on"
 
-        def make_date(s: Optional[str]):
-            return datetime.datetime.fromisoformat(s) if s else None
-
         since: Optional[datetime.datetime] = make_date(request.query.get("since"))
         until: Optional[datetime.datetime] = make_date(request.query.get("until"))
-
-        # TODO handle since/until
+        tail: Optional[int] = make_int(request.query.get("tail"))
 
         # https://docs.aiohttp.org/en/stable/web_lowlevel.html
         response = web.StreamResponse()
@@ -855,9 +860,21 @@ class Compose:
 
         now = datetime.datetime.now()
 
-        if add_context or since is not None or (until is not None and until < now):
-            for s in services:
-                self.services[s].feed_handler(logs_to_response, since=since, until=until)
+        if (
+            add_context
+            or since is not None
+            or (until is not None and until < now)
+            or tail is not None
+        ):
+            self.logger.debug(f"Providing log context since={since}, until={until}, tail={tail}")
+            log_context = list(
+                r
+                for s in services
+                for r in self.services[s].get_log_context(since=since, until=until, tail=tail)
+            )
+            log_context.sort(key=lambda x: x.created)
+            for r in log_context:
+                logs_to_response.emit(r)
 
         if follow or until is not None and until > now:
             for s in services:
@@ -870,6 +887,9 @@ class Compose:
 
             assert response.task is not None
             response.task.add_done_callback(detach_loggers)
+
+        # Yield for context messages processing
+        await asyncio.sleep(0)
 
         try:
             # TODO: cleaner solution? websocket here?
@@ -1051,9 +1071,9 @@ class Compose:
             await self.shutdown()
 
         # It is here to prevent too early server stop when closing...
-        # Even short sleeps are probably enogh, so the handler can take the loop.
+        # Even short sleeps are probably enough, so the handler can take the event loop.
         for _ in range(5):
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0)
         if self.app is not None:
             await self.app.shutdown()
 

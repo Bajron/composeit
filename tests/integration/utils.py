@@ -143,6 +143,7 @@ class LogsGatherer:
             [
                 "composeit",
                 "logs",
+                "--follow",
                 *([] if marker_filter and len(args_services) == 1 else args_services),
             ],
             stdout=subprocess.PIPE,

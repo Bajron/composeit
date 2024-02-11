@@ -94,11 +94,10 @@ def main():
     parser_logs = subparsers.add_parser("logs", help="Show logs from the services")
     parser_logs.add_argument("service", nargs="*", help="Specific services to show logs from")
     parser_logs.add_argument(
-        "--with-context", default=False, action="store_true", help="Show previous logs context"
+        "--with-context", default=None, action="store_true", help="Show previous logs context"
     )
-    # TODO correct the default (just for back compatibility set to True)
     parser_logs.add_argument(
-        "--follow", "-f", default=True, action="store_true", help="Follow the logs"
+        "--follow", "-f", default=False, action="store_true", help="Follow the logs"
     )
     parser_logs.add_argument(
         "--no-context",
@@ -106,8 +105,32 @@ def main():
         action="store_false",
         help="Do not show previous logs context",
     )
-    parser_logs.add_argument("--since", type=date_or_duration, help="Only show logs since date")
-    parser_logs.add_argument("--until", type=date_or_duration, help="Only show logs until date")
+    parser_logs.add_argument(
+        "--since", default=None, type=date_or_duration, help="Only show logs since date"
+    )
+    parser_logs.add_argument(
+        "--until", default=None, type=date_or_duration, help="Only show logs until date"
+    )
+    parser_logs.add_argument(
+        "--tail",
+        "-n",
+        type=int,
+        default=None,
+        help="Number of recent logs to show from each container",
+    )
+    parser_logs.add_argument(
+        "--no-color",
+        dest="logs_no_color",
+        default=None,
+        action="store_true",
+        help="Monochrome output",
+    )
+    parser_logs.add_argument(
+        "--no-log-prefix", default=None, action="store_true", help="Do not show service name"
+    )
+    parser_logs.add_argument(
+        "--timestamps", "-t", default=None, action="store_true", help="Show timestamps"
+    )
 
     parser_attach = subparsers.add_parser("attach", help="Attach to a service")
     parser_attach.add_argument("service", nargs=1, help="Specific service to attach to")
@@ -298,7 +321,15 @@ def main():
             elif options.command == "logs":
                 return asyncio.run(
                     compose.logs(
-                        services, options.with_context, options.follow, options.since, options.until
+                        services,
+                        context=options.with_context,
+                        follow=options.follow,
+                        since=options.since,
+                        until=options.until,
+                        tail=options.tail,
+                        color=None if options.logs_no_color is None else not options.logs_no_color,
+                        timestamps=options.timestamps,
+                        prefix=None if options.no_log_prefix is None else not options.no_log_prefix,
                     )
                 )
             elif options.command == "attach":

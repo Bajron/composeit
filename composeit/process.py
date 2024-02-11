@@ -10,7 +10,7 @@ import subprocess
 import time
 from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
-from .log_utils import LogKeeper
+from .log_utils import LogKeeper, LogRecord
 from .service_config import (
     get_command,
     resolve_command,
@@ -20,7 +20,7 @@ from .service_config import (
     get_environment,
 )
 
-from typing import List, Optional, Union, Dict, Any, Coroutine
+from typing import List, Optional, Union, Dict, Any, Coroutine, Generator
 
 
 def make_colored(color):
@@ -216,21 +216,36 @@ class AsyncProcess:
         handler: logging.StreamHandler,
         since: Optional[datetime.datetime] = None,
         until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
     ):
-        c = self.lerr_keeper.window + self.lout_keeper.window + self.log_keeper.window
-        if len(c) == 0:
+        for r in self.get_log_context(since, until, tail):
+            handler.emit(r)
+
+    def get_log_context(
+        self,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
+    ) -> Generator[LogRecord, None, None]:
+        log_context = self.lerr_keeper.window + self.lout_keeper.window + self.log_keeper.window
+        if len(log_context) == 0:
             return
 
-        c.sort(key=lambda x: x.created)
+        log_context.sort(key=lambda x: x.created)
+
+        if tail is not None:
+            log_context = log_context[-tail:]
 
         since_second: float = since.timestamp() if since is not None else 0
-        until_second: float = until.timestamp() if until is not None else (c[-1].created + 1)
-        for r in c:
+        until_second: float = (
+            until.timestamp() if until is not None else (log_context[-1].created + 1)
+        )
+        for r in log_context:
             if r.created < since_second:
                 continue
             if r.created > until_second:
                 break
-            handler.emit(r)
+            yield r
 
     def attach_log_handler(self, handler: logging.StreamHandler):
         self.log.debug(f"Logger attached {handler}")

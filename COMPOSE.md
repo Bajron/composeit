@@ -122,14 +122,14 @@ Only certain window of recent logs is stored for each process.
 There are no advanced logging storage drivers.
 
 Commandline arguments:
-* `[ ]` `--follow|-f` TODO: this is actually default now
-* `[x]` `--with-context` - TODO: should this be the default, and --tail for context?
-* `[ ]` `--no-color`
-* `[ ]` `--no-log-prefix`
-* `[ ]` `--since`
-* `[ ]` `--tail|-n`
-* `[ ]` `--timestamps|-t`
-* `[ ]` `--until`
+* `[x]` `--follow|-f`
+* `[x]` `--with-context`
+* `[x]` `--no-color`
+* `[x]` `--no-log-prefix`
+* `[x]` `--since`
+* `[x]` `--tail|-n`
+* `[x]` `--timestamps|-t`
+* `[x]` `--until`
 
 Service keys:
 * `[x]` `logging`

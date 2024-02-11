@@ -1,5 +1,6 @@
 import logging
 import json
+import datetime
 from logging import LogRecord
 from typing import Dict, List, Mapping, Any, Literal, Optional, Union
 from termcolor import colored
@@ -27,7 +28,7 @@ class JsonFormatter(logging.Formatter):
         fmt: Optional[str] = None,
         datefmt: Optional[str] = None,
         style: Literal["%", "{", "$"] = "%",
-        validate: bool = True
+        validate: bool = True,
     ) -> None:
         super().__init__(fmt, datefmt, style, validate)
 
@@ -53,6 +54,40 @@ class JsonFormatter(logging.Formatter):
         if record.stack_info:
             json_object["stack"] = self.formatStack(record.stack_info)
         return json.dumps(json_object)
+
+
+def build_print_function(single, color=None, prefix=None, timestamps=None):
+    default_color = True
+    default_prefix = True
+    default_timestamps = False
+    if single:
+        default_prefix = False
+        default_color = False
+
+    if color is None:
+        color = default_color
+    if prefix is None:
+        prefix = default_prefix
+    if timestamps is None:
+        timestamps = default_timestamps
+
+    keys = []
+    if prefix:
+        keys.append("name")
+    keys.append("message")
+
+    def print_function(fields: Dict[str, Any]):
+        msg = " ".join([fields[k] for k in keys])
+        if timestamps:
+            ts = datetime.datetime.fromtimestamp(fields["create_time"]).isoformat()
+            msg = f"{ts} {msg}"
+        c = fields.get("color", None)
+        if color and c is not None:
+            print(colored(msg, c))
+        else:
+            print(msg)
+
+    return print_function
 
 
 def print_message(fields: Dict[str, str]):
