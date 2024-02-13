@@ -9,6 +9,7 @@ import asyncio
 from typing import Dict
 
 from .compose import Compose
+from .process import PossibleStates
 from .utils import get_stack_string, date_or_duration
 from .service_config import get_dict_from_env_list, get_signal, get_default_kill
 
@@ -146,6 +147,19 @@ def main():
 
     parser_ps = subparsers.add_parser("ps", help="Show services state")
     parser_ps.add_argument("service", nargs="*", help="Specific services to show")
+    parser_ps.add_argument(
+        "--format",
+        default="default",
+        choices=["json", "default"],
+        help="Change output format (unstable)",
+    )
+    parser_ps.add_argument(
+        "--no-trunc", default=False, action="store_true", help="Do not truncate output"
+    )
+    parser_ps.add_argument(
+        "--quiet", "-q", default=False, action="store_true", help="Show service names only"
+    )
+    parser_ps.add_argument("--status", default=None, choices=PossibleStates, help="Filter by status")
 
     parser_top = subparsers.add_parser("top", help="Show processes")
     parser_top.add_argument("service", nargs="*", help="Specific services to show processes from")
@@ -338,7 +352,15 @@ def main():
             elif options.command == "config":
                 return process_config_option(compose, options)
             elif options.command == "ps":
-                return asyncio.run(compose.ps(services))
+                return asyncio.run(
+                    compose.ps(
+                        services,
+                        format=options.format,
+                        truncate=not options.no_trunc,
+                        quiet=options.quiet,
+                        status=options.status,
+                    )
+                )
             elif options.command == "top":
                 return asyncio.run(compose.top(services))
             else:

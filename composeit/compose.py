@@ -536,11 +536,11 @@ class Compose:
         for row in service_data:
             print(fmt.format(**row))
 
-    async def ps(self, services: Optional[List[str]] = None):
+    async def ps(self, services: Optional[List[str]] = None, **kwargs):
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_ps_session(services))
+            await self.run_client_session(self.make_ps_session(services, **kwargs))
         else:
             self.logger.warning("Server is not running")
             self.assure_service_config()
@@ -549,9 +549,11 @@ class Compose:
                 {"name": name, "command": get_command(s, self.logger), "state": "-", "sequence": i}
                 for i, (name, s) in enumerate(self.service_config["services"].items())
             ]
-            self.show_service_status(self.working_directory, self.project_name, services_info)
+            self.show_service_status(
+                self.working_directory, self.project_name, services_info, **kwargs
+            )
 
-    def make_ps_session(self, services: Optional[List[str]] = None):
+    def make_ps_session(self, services: Optional[List[str]] = None, **kwargs):
         async def client_session(session: aiohttp.ClientSession):
             async with session.get(f"/") as response:
                 compose_data = await response.json()
@@ -569,12 +571,35 @@ class Compose:
                 async with session.get(f"/{project}/{s}") as response:
                     service_data.append(await response.json())
 
-            self.show_service_status(working_directory, project, service_data)
+            self.show_service_status(working_directory, project, service_data, **kwargs)
 
         return client_session
 
-    def show_service_status(self, working_directory, project, service_data):
+    def show_service_status(
+        self,
+        working_directory,
+        project,
+        service_data,
+        format="default",
+        truncate=True,
+        quiet=False,
+        status=None,
+    ):
         service_data.sort(key=lambda x: x["sequence"])
+        if status is not None:
+            service_data = list(filter(lambda x: x["state"] == status, service_data))
+
+        if quiet:
+            service_data = list(map(lambda x: {"name": x["name"]}, service_data))
+
+        if format == "json":
+            json.dump(service_data, indent=2, fp=sys.stdout)
+            return
+        elif quiet:
+            for s in service_data:
+                print(s["name"])
+            return
+
         now = time.time()
 
         header = [
@@ -596,7 +621,7 @@ class Compose:
             row["name"] = s["name"]
 
             cmd = " ".join(s["command"]) if isinstance(s["command"], list) else s["command"]
-            if len(cmd) > 30:
+            if truncate and len(cmd) > 30:
                 cmd = cmd[:27] + "..."
             row["command"] = cmd
 

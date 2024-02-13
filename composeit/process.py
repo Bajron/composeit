@@ -35,6 +35,15 @@ def not_colored(s):
 
 
 RestartPolicyOptions = ["no", "always", "on-failure", "unless-stopped"]
+PossibleStates = [
+    "terminated",
+    "terminating",
+    "stopping",
+    "stopped",
+    "restarting",
+    "started",
+    "starting",
+]
 
 
 class AsyncProcess:

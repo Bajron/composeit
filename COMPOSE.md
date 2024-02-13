@@ -162,15 +162,17 @@ Not applicable. `port` option is not handled in services YAML specification too.
 ## ps
 
 Shows the status of services.
+When server is not running, lists the services based on the config.
 
 Commandline arguments:
-* `[ ]` `--all|-a`
-* `[ ]` `--filter`
-* `[ ]` `--format`
-* `[ ]` `--no-trunc`
-* `[ ]` `--orphans`
-* `[ ]` `--services`
-* `[ ]` `--status`
+* `[ ]` `--all|-a` - not sure if it is applicable
+* `[ ]` `--filter` - maybe some day
+* `[~]` `--format` - experimental, and not consistent
+* `[x]` `--no-trunc` - Applied only to command
+* `[ ]` `--orphans` - could make sense with dynamic config update
+* `[~]` `--quiet` - kind of implemented
+* `[ ]` `--services` - is it applicable?, not sure what it is
+* `[~]` `--status` - based on process states
 
 ## start
 
