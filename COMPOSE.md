@@ -174,6 +174,18 @@ Commandline arguments:
 * `[ ]` `--services` - is it applicable?, not sure what it is
 * `[~]` `--status` - based on process states
 
+## ~~pull~~
+
+Not implemented. Not applicable.
+Downloading binaries from the web some day? Not likely.
+
+## ~~push~~
+
+Not implemented. Not applicable.
+Downloading binaries to the web some day? Not likely.
+
+## restart
+
 ## start
 
 ## up
