@@ -186,6 +186,23 @@ Downloading binaries to the web some day? Not likely.
 
 ## restart
 
+Restarts processes.
+
+Commandline arguments:
+* `[x]` `--no-deps`
+* `[x]` `--timeout|-t`
+
+## ~~rm~~
+
+Not implemented. See `down` for removing built applications.
+
+## _run_
+
+Not implemented.
+Could add arguments to the process maybe.
+
 ## start
+
+Starts services
 
 ## up

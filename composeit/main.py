@@ -159,7 +159,18 @@ def main():
     parser_ps.add_argument(
         "--quiet", "-q", default=False, action="store_true", help="Show service names only"
     )
-    parser_ps.add_argument("--status", default=None, choices=PossibleStates, help="Filter by status")
+    parser_ps.add_argument(
+        "--status", default=None, choices=PossibleStates, help="Filter by status"
+    )
+
+    parser_restart = subparsers.add_parser("restart", help="Restart services")
+    parser_restart.add_argument("service", nargs="*", help="Specific services to restart")
+    parser_restart.add_argument(
+        "--no-deps", default=False, action="store_true", help="Do not restart dependencies"
+    )
+    parser_restart.add_argument(
+        "--timeout", "-t", default=None, type=float, help="Shutdown timeout for a service"
+    )
 
     parser_top = subparsers.add_parser("top", help="Show processes")
     parser_top.add_argument("service", nargs="*", help="Specific services to show processes from")
@@ -330,6 +341,10 @@ def main():
             elif options.command == "stop":
                 timeout = options.timeout if hasattr(options, "timeout") else None
                 return asyncio.run(compose.stop(services, timeout=timeout))
+            elif options.command == "restart":
+                return asyncio.run(
+                    compose.restart(services, no_deps=options.no_deps, timeout=options.timeout)
+                )
             elif options.command == "kill":
                 return asyncio.run(compose.kill(services, signal=options.signal))
             elif options.command == "logs":

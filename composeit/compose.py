@@ -282,6 +282,40 @@ class Compose:
 
         return run_client_commands
 
+    async def restart(self, services=None, **kwargs):
+        server_up = await self.check_server_is_running()
+        if server_up:
+            await self.run_client_session(self.make_restart_session(services, **kwargs))
+        else:
+            self.logger.error("Server is not running")
+
+    def make_restart_session(self, services=None, no_deps=False, timeout=None):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            project = await get_project(session)
+
+            specification = {"no_deps": no_deps}
+            if timeout is not None:
+                specification["timeout"] = timeout
+            if services is not None:
+                specification["services"] = services
+
+            if services is not None and len(services) == 1:
+                service = services[0]
+                response = await session.post(
+                    f"/{project}/{service}/restart",
+                    json=specification,
+                )
+                if response.status == 200:
+                    print(service, await response.json())
+            else:
+                response = await session.post(f"/{project}/restart", json=specification)
+                if response.status == 200:
+                    print(project, await response.json())
+
+            return response
+
+        return run_client_commands
+
     async def kill(self, services=None, signal=9):
         server_up = await self.check_server_is_running()
         if server_up:
@@ -946,6 +980,41 @@ class Compose:
             await self.services[s].stop()
         return web.json_response("Stopped")
 
+    async def post_restart_project(self, request: web.Request):
+        self._get_project(request)
+        body = await self._get_json_or_empty(request)
+        services = body.get("services")
+        if services is None:
+            services = list(self.services.keys())
+
+        sequence = services if body.get("no_deps", False) else self.get_stop_sequence(services)
+        timeout = body.get("timeout", None)
+
+        await self._restart_in_sequence(sequence, timeout)
+
+        return web.json_response("Restarted")
+
+    async def post_restart_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        body = await self._get_json_or_empty(request)
+        sequence = [service] if body.get("no_deps", False) else self.get_stop_sequence([service])
+        timeout = body.get("timeout", None)
+
+        await self._restart_in_sequence(sequence, timeout)
+
+        return web.json_response("Restarted")
+
+    async def _restart_in_sequence(self, sequence, timeout=None):
+        for s in sequence:
+            try:
+                await asyncio.wait_for(self.services[s].stop(), timeout)
+            except asyncio.TimeoutError:
+                await self.services[s].stop()
+
+        for s in reversed(sequence):
+            self.services[s].start()
+
     async def post_kill_service(self, request: web.Request):
         self._get_project(request)
         service = self._get_service(request)
@@ -1003,6 +1072,8 @@ class Compose:
                 web.get("/{project}/{service}/top", self.get_service_processes),
                 web.post("/{project}/{service}/kill", self.post_kill_service),
                 web.post("/{project}/kill", self.post_kill_project),
+                web.post("/{project}/{service}/restart", self.post_restart_service),
+                web.post("/{project}/restart", self.post_restart_project),
             ]
         )
 
@@ -1163,6 +1234,24 @@ class Compose:
                 return await response.json()
 
         return client_session
+
+
+async def get_project_and_services(session: aiohttp.ClientSession):
+    project = await get_project(session)
+    existing_services = await get_services(session, project)
+    return project, existing_services
+
+
+async def get_project(session: aiohttp.ClientSession):
+    response = await session.get(f"/")
+    data = await response.json()
+    return data["project_name"]
+
+
+async def get_services(session: aiohttp.ClientSession, project):
+    response = await session.get(f"/{project}")
+    data = await response.json()
+    return data["services"]
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
