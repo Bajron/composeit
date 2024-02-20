@@ -205,4 +205,59 @@ Could add arguments to the process maybe.
 
 Starts services
 
+## stop
+
+Stops services
+
+Commandline arguments:
+* `[x]` `--timeout|-t`
+
+## top
+
+Display running processes.
+
+## _unpause_
+
+Not implemented. Maybe if there is pause...
+
 ## up
+
+Commandline arguments:
+* `[ ]` `--abort-on-container-exit`
+* `[ ]` `--always-recreate-deps`
+* `[ ]` `--attach`
+* `[ ]` `--attach-dependencies`
+* `[x]` `--build`
+* `[x]` `--build-arg`
+* `[ ]` `-d|--detach`
+* `[ ]` `--exit-code-from`
+* `[ ]` `--no-attach`
+* `[ ]` `--no-build`
+* `[ ]` `--no-color`
+* `[ ]` `--no-deps`
+* `[ ]` `--no-log-prefix`
+* `[x]` `--no-start`		Don't start the services after creating them.
+* `[ ]` `--remove-orphans`
+* `[ ]` `--scale`
+* `[ ]` `-t|--timeout`
+* `[ ]` `--timestamps`
+* `[ ]` `--wait`
+* `[ ]` `--wait-timeout`
+
+## version
+
+Commandline arguments:
+* `[ ]` `-f|--format`
+* `[ ]` `--short`
+
+## wait
+
+Not implemented yet.
+
+Commandline arguments:
+* `[ ]` `--down-project`
+
+## _watch_
+
+Not implemented. Could be feasible...
+Would require more explicit dependencies than the current approach to build.
