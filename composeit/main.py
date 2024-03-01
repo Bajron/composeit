@@ -5,8 +5,9 @@ import sys
 import logging
 import dotenv
 import asyncio
+import subprocess
 
-from typing import Dict
+from typing import Dict, Any
 
 from .compose import Compose
 from .process import PossibleStates
@@ -51,6 +52,13 @@ def main():
         default=False,
         action="store_true",
         help="Do not start services. Daemon stays started.",
+    )
+    parser_up.add_argument(
+        "--detach",
+        "-d",
+        default=False,
+        action="store_true",
+        help="Start the server in the background",
     )
 
     parser_start = subparsers.add_parser("start", help="Startup the services")
@@ -278,6 +286,7 @@ def main():
     env_files = [e.absolute() for e in options.env_file]
 
     # NOTE: evaluate all paths from the commandline before changing working directory
+    original_working_directory = os.getcwd()
     os.chdir(working_directory)
     cfg_log.debug(f"Changed directory to: {working_directory}")
 
@@ -328,7 +337,27 @@ def main():
                 services = []
 
             if options.command == "up":
-                return asyncio.run(compose.up(services))
+                if options.detach:
+                    up = sys.argv.index("up")
+                    without_detach = lambda x: x not in ["-d", "--detach"]
+                    filtered_argv = sys.argv[:up] + list(filter(without_detach, sys.argv[up:]))
+
+                    popen_kw: Dict[str, Any] = {}
+                    if os.name == "nt":
+                        popen_kw.update(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+                    else:
+                        popen_kw.update(start_new_session=True)
+                    subprocess.Popen(
+                        filtered_argv,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        cwd=original_working_directory,
+                        **popen_kw,
+                    )
+                    return
+                else:
+                    return asyncio.run(compose.up(services))
             elif options.command == "start":
                 return asyncio.run(compose.start(services))
             elif options.command == "build":

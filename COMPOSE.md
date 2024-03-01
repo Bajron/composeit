@@ -229,7 +229,7 @@ Commandline arguments:
 * `[ ]` `--attach-dependencies`
 * `[x]` `--build`
 * `[x]` `--build-arg`
-* `[ ]` `-d|--detach`
+* `[~]` `-d|--detach`
 * `[ ]` `--exit-code-from`
 * `[ ]` `--no-attach`
 * `[ ]` `--no-build`
