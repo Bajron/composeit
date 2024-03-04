@@ -1,0 +1,7 @@
+services:
+  simple1:
+    command: [python, ../../counter.py, --time, 0.01, --exit, 5, --return-code, 11]
+  simple2:
+    command: [python, ../../counter.py, --time, "0.01", --exit, 2, --return-code, 22]
+  simple3:
+    command: [python, ../../counter.py, --time, 0.2, --return-code, 33]

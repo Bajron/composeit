@@ -166,19 +166,24 @@ class Compose:
         return topological_sequence(services, self.depending)
 
     async def build(self, services=None):
-        await self.watch_services(
+        return await self.watch_services(
             start_server=False, start_services=services, execute=False, execute_build=True
         )
 
-    async def up(self, services=None):
-        await self.start(services=services, execute_build=True)
+    async def up(self, services=None, **kwargs):
+        return await self.start(services=services, execute_build=True, **kwargs)
 
-    async def start(self, services=None, execute_build=False):
+    async def start(self, services=None, execute_build=False, abort_on_exit=False, code_from=None):
         server_up = await self.check_server_is_running()
         if server_up:
-            await self.run_client_session(self.make_start_session(services, execute_build))
+            return await self.run_client_session(self.make_start_session(services, execute_build))
         else:
-            await self.watch_services(start_services=services, execute_build=execute_build)
+            return await self.watch_services(
+                start_services=services,
+                execute_build=execute_build,
+                abort_on_exit=abort_on_exit,
+                code_from=code_from,
+            )
 
     def make_start_session(self, services=None, request_build=False):
         async def run_client_commands(session: aiohttp.ClientSession):
@@ -200,6 +205,7 @@ class Compose:
             else:
                 to_request = existing_services
 
+            bad_responses = 0
             for service in to_request:
                 response = await session.post(
                     f"/{project}/{service}/start",
@@ -207,18 +213,21 @@ class Compose:
                 )
                 if response.status == 200:
                     print(service, await response.json())
-            return response
+                else:
+                    bad_responses += 1
+
+            return 0 if bad_responses == 0 else 1
 
         return run_client_commands
 
     async def down(self, services=None, timeout=None):
         server_up = await self.check_server_is_running()
         if server_up:
-            await self.stop(
+            return await self.stop(
                 services=services, request_clean=True, server_up=server_up, timeout=timeout
             )
         else:
-            await self.watch_services(
+            return await self.watch_services(
                 services, start_server=False, execute=False, execute_build=False, execute_clean=True
             )
 
@@ -227,9 +236,12 @@ class Compose:
             server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_stop_session(services, request_clean, timeout))
+            return await self.run_client_session(
+                self.make_stop_session(services, request_clean, timeout)
+            )
         else:
             self.logger.error("Server is not running")
+            return 1
 
     def make_stop_session(self, services=None, request_clean=False, timeout=None):
         async def run_client_commands(session: aiohttp.ClientSession):
@@ -278,16 +290,17 @@ class Compose:
                 if response.status == 200:
                     print(project, await response.json())
 
-            return response
+            return 0 if 200 <= response.status < 300 else 1
 
         return run_client_commands
 
     async def restart(self, services=None, **kwargs):
         server_up = await self.check_server_is_running()
         if server_up:
-            await self.run_client_session(self.make_restart_session(services, **kwargs))
+            return await self.run_client_session(self.make_restart_session(services, **kwargs))
         else:
             self.logger.error("Server is not running")
+            return 1
 
     def make_restart_session(self, services=None, no_deps=False, timeout=None):
         async def run_client_commands(session: aiohttp.ClientSession):
@@ -312,16 +325,17 @@ class Compose:
                 if response.status == 200:
                     print(project, await response.json())
 
-            return response
+            return 0 if 200 <= response.status < 300 else 1
 
         return run_client_commands
 
     async def kill(self, services=None, signal=9):
         server_up = await self.check_server_is_running()
         if server_up:
-            await self.run_client_session(self.make_kill_session(services, signal))
+            return await self.run_client_session(self.make_kill_session(services, signal))
         else:
             self.logger.error("Server is not running")
+            return 1
 
     def make_kill_session(self, services=None, signal=9):
         async def run_client_commands(session: aiohttp.ClientSession):
@@ -357,7 +371,8 @@ class Compose:
                 response.raise_for_status()
 
             print(project, await response.json())
-            return response
+
+            return 0 if 200 <= response.status < 300 else 1
 
         return run_client_commands
 
@@ -369,9 +384,10 @@ class Compose:
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_logs_session(services, **kwargs))
+            return await self.run_client_session(self.make_logs_session(services, **kwargs))
         else:
             self.logger.error("Server is not running")
+            return 1
 
     def make_logs_session(
         self,
@@ -447,11 +463,15 @@ class Compose:
                         if not self.verbose and fields["levelno"] == logging.DEBUG:
                             continue
                         print_function(fields)
+                    return 0
                 except asyncio.CancelledError:
                     self.logger.debug("Request cancelled")
+                    return 1
                 except aiohttp.ClientConnectionError as ex:
                     if not close_requested:
                         self.logger.warning("Connection error {ex}")
+                        return 2
+            return 0
 
         return stream_logs_response
 
@@ -459,9 +479,10 @@ class Compose:
         server_up = await self.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_attach_session(service, context))
+            return await self.run_client_session(self.make_attach_session(service, context))
         else:
             self.logger.error("Server is not running")
+            return 1
 
     def make_attach_session(self, service: str, context: bool = False):
         async def client_session(session: aiohttp.ClientSession):
@@ -507,8 +528,10 @@ class Compose:
                         input_line = await loop.run_in_executor(None, sys.stdin.readline)
                         if not ws.closed:
                             await ws.send_str(input_line)
+                    return 0
                 except asyncio.CancelledError:
                     self.logger.debug("Attach cancelled")
+                    return 1
 
         return client_session
 
@@ -1100,14 +1123,20 @@ class Compose:
         execute=True,
         execute_build=False,
         execute_clean=False,
+        abort_on_exit=False,
+        code_from=None,
     ):
         try:
             self.assure_service_config()
         except Exception as ex:
             self.logger.error(f"Exception while loading config: {ex}")
-            return
+            return -1
 
         assert self.service_config is not None
+
+        if code_from is not None and code_from not in self.service_config["services"].keys():
+            self.logger.error(f"{code_from} is not found among services")
+            return -1
 
         try:
             shared_logging_config = get_shared_logging_config(self.service_config)
@@ -1138,8 +1167,16 @@ class Compose:
                 for s in self.services.values():
                     s.log.setLevel(logging.DEBUG)
 
+            async def on_exit_aborter(source_service: AsyncProcess):
+                self.logger.debug(f"Aborting after {source_service.name} stop")
+                await self.shutdown(request_clean=execute_clean)
+
+            if abort_on_exit:
+                for s in self.services.values():
+                    s.on_stop.append(on_exit_aborter)
+
             def signal_handler(signal, frame):
-                asyncio.get_event_loop().create_task(self.shutdown())
+                asyncio.get_event_loop().create_task(self.shutdown(request_clean=execute_clean))
 
             signal.signal(signal.SIGINT, signal_handler)
             # Well, this is not implemented for Windows
@@ -1173,6 +1210,11 @@ class Compose:
         if self.app is not None:
             await self.app.shutdown()
 
+        if code_from is not None:
+            return self.services[code_from].rc
+        else:
+            return 0
+
     def get_always_restart_services(self):
         return [
             name for name, service in self.services.items() if service.restart_policy == "always"
@@ -1187,7 +1229,7 @@ class Compose:
             self.logger.error(f"Name error for {self.communication_pipe}: {ex}")
         except ClientResponseError as ex:
             self.logger.error(f"Error response: {ex}")
-        return None
+        return 3
 
     async def execute_with_connector(self, connector_function):
         self.logger.debug(f"Connect: {self.communication_pipe}")

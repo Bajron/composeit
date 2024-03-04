@@ -223,14 +223,14 @@ Not implemented. Maybe if there is pause...
 ## up
 
 Commandline arguments:
-* `[ ]` `--abort-on-container-exit`
+* `[x]` `--abort-on-container-exit`
 * `[ ]` `--always-recreate-deps`
 * `[ ]` `--attach`
 * `[ ]` `--attach-dependencies`
 * `[x]` `--build`
 * `[x]` `--build-arg`
 * `[~]` `-d|--detach`
-* `[ ]` `--exit-code-from`
+* `[x]` `--exit-code-from`
 * `[ ]` `--no-attach`
 * `[ ]` `--no-build`
 * `[ ]` `--no-color`

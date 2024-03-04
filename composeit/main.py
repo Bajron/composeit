@@ -60,6 +60,19 @@ def main():
         action="store_true",
         help="Start the server in the background",
     )
+    parser_up.add_argument(
+        "--abort-on-service-exit",
+        "--abort-on-container-exit",
+        default=False,
+        action="store_true",
+        help="Stop the project if any service exits (interactive only)",
+    )
+    parser_up.add_argument(
+        "--exit-code-from",
+        default=None,
+        help="Return the exit code of the selected service",
+    )
+    not_for_detached = ["-d", "--detach", "--abort-on-container-exit"]
 
     parser_start = subparsers.add_parser("start", help="Startup the services")
     parser_start.add_argument("service", nargs="*", help="Specific service to start")
@@ -339,7 +352,7 @@ def main():
             if options.command == "up":
                 if options.detach:
                     up = sys.argv.index("up")
-                    without_detach = lambda x: x not in ["-d", "--detach"]
+                    without_detach = lambda x: x not in not_for_detached
                     filtered_argv = sys.argv[:up] + list(filter(without_detach, sys.argv[up:]))
 
                     popen_kw: Dict[str, Any] = {}
@@ -357,7 +370,13 @@ def main():
                     )
                     return
                 else:
-                    return asyncio.run(compose.up(services))
+                    return asyncio.run(
+                        compose.up(
+                            services,
+                            abort_on_exit=options.abort_on_service_exit,
+                            code_from=options.exit_code_from,
+                        )
+                    )
             elif options.command == "start":
                 return asyncio.run(compose.start(services))
             elif options.command == "build":
@@ -413,6 +432,7 @@ def main():
     except FileNotFoundError as ex:
         cfg_log.debug(get_stack_string())
         cfg_log.error(f"File not found {ex.filename}")
+        return -1
     else:
         parser.print_help()
         return 1

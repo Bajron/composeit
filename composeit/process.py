@@ -20,7 +20,7 @@ from .service_config import (
     get_environment,
 )
 
-from typing import List, Optional, Union, Dict, Any, Coroutine, Generator
+from typing import List, Optional, Union, Dict, Any, Coroutine, Generator, Callable
 
 
 def make_colored(color):
@@ -159,6 +159,8 @@ class AsyncProcess:
         self.terminated_and_done: bool = False
         self.stopped: bool = True
         self.exception: Optional[Exception] = None
+
+        self.on_stop: List[Callable] = []
 
     def _adapt_logger(self, logger: logging.Logger) -> logging.LoggerAdapter:
         return logging.LoggerAdapter(
@@ -449,6 +451,8 @@ class AsyncProcess:
                     self.log.info(
                         f"{self.service_config['command']} finished with error code {self.rc}"
                     )
+                    for c in self.on_stop:
+                        await c(self)
 
                     self.log.info(f"Restart policy is {self.restart_policy}")
                     process_started = await self._resolve_restart()
