@@ -72,6 +72,24 @@ def main():
         default=None,
         help="Return the exit code of the selected service",
     )
+    parser_up.add_argument(
+        "--no-attach",
+        default=None,
+        nargs="*",
+        help="Hide logs from certain services",
+    )
+    parser_up.add_argument(
+        "--no-build",
+        default=False,
+        action="store_true",
+        help="Do not build"
+    )
+    parser_up.add_argument(
+        "--no-deps",
+        default=False,
+        action="store_true",
+        help="Do not start dependent services"
+    )
     not_for_detached = ["-d", "--detach", "--abort-on-container-exit"]
 
     parser_start = subparsers.add_parser("start", help="Startup the services")
@@ -81,6 +99,12 @@ def main():
         default=False,
         action="store_true",
         help="Do not start services. Daemon stays started.",
+    )
+    parser_start.add_argument(
+        "--no-deps",
+        default=False,
+        action="store_true",
+        help="Do not start dependent services"
     )
 
     parser_build = subparsers.add_parser("build", help="Build the services")
@@ -373,12 +397,15 @@ def main():
                     return asyncio.run(
                         compose.up(
                             services,
+                            no_build=options.no_build,
                             abort_on_exit=options.abort_on_service_exit,
                             code_from=options.exit_code_from,
+                            no_attach=options.no_attach,
+                            no_deps=options.no_deps,
                         )
                     )
             elif options.command == "start":
-                return asyncio.run(compose.start(services))
+                return asyncio.run(compose.start(services, no_deps=options.no_deps))
             elif options.command == "build":
                 return asyncio.run(compose.build(services))
             elif options.command == "images":

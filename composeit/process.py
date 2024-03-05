@@ -57,6 +57,7 @@ class AsyncProcess:
         execute_build: bool = False,
         execute_clean: bool = False,
         build_args: Optional[Dict[str, str]] = None,
+        show_logs: bool = True,
     ):
         self.sequence: int = sequence
         self.name: str = name
@@ -94,21 +95,24 @@ class AsyncProcess:
         self.lerr_keeper = LogKeeper(window=30)
         self.log_keeper = LogKeeper(window=30)
 
-        logHandler = logging.StreamHandler(stream=sys.stderr)
-        logHandler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
-        self._log.addHandler(logHandler)
+        if show_logs:
+            logHandler = logging.StreamHandler(stream=sys.stderr)
+            logHandler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
+            self._log.addHandler(logHandler)
+
+            streamHandler = logging.StreamHandler(stream=sys.stdout)
+            streamHandler.setFormatter(self.get_output_formatter())
+            self._lout.addHandler(streamHandler)
+            self._lerr.addHandler(streamHandler)
+
         self._log.addHandler(self.log_keeper)
         self._log.setLevel(logging.INFO)
         self._log.propagate = False
 
-        streamHandler = logging.StreamHandler(stream=sys.stdout)
-        streamHandler.setFormatter(self.get_output_formatter())
         self._lout.setLevel(logging.INFO)
-        self._lout.addHandler(streamHandler)
         self._lout.addHandler(self.lout_keeper)
         self._lout.propagate = False
         self._lerr.setLevel(logging.INFO)
-        self._lerr.addHandler(streamHandler)
         self._lerr.addHandler(self.lerr_keeper)
         self._lerr.propagate = False
 

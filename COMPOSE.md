@@ -231,10 +231,10 @@ Commandline arguments:
 * `[x]` `--build-arg`
 * `[~]` `-d|--detach`
 * `[x]` `--exit-code-from`
-* `[ ]` `--no-attach`
-* `[ ]` `--no-build`
+* `[x]` `--no-attach`
+* `[x]` `--no-build`
 * `[ ]` `--no-color`
-* `[ ]` `--no-deps`
+* `[x]` `--no-deps`
 * `[ ]` `--no-log-prefix`
 * `[x]` `--no-start`		Don't start the services after creating them.
 * `[ ]` `--remove-orphans`

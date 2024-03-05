@@ -107,3 +107,26 @@ def test_restarting_dependencies(process_cleaner):
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)
         assert rc is not None
+
+
+def test_up_no_deps(process_cleaner):
+    service_directory = tests_directory / "projects" / "depends_on"
+
+    try:
+        up = subprocess.Popen(
+            ["composeit", "up", "leaf", "--no-deps"], cwd=service_directory, stdout=subprocess.PIPE
+        )
+        process_cleaner.append(up)
+
+        for _ in range(5):
+            states = ps(service_directory)
+            if states is not None and states["leaf"] == "up":
+                break
+
+        assert states["leaf"] == "up"
+        assert states["middle"] != "up"
+        assert states["root"] != "up"
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        rc = up.wait(5)
+        assert rc is not None

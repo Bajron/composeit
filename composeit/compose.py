@@ -170,22 +170,32 @@ class Compose:
             start_server=False, start_services=services, execute=False, execute_build=True
         )
 
-    async def up(self, services=None, **kwargs):
-        return await self.start(services=services, execute_build=True, **kwargs)
+    async def up(self, services=None, no_build=False, **kwargs):
+        return await self.start(services=services, execute_build=not no_build, **kwargs)
 
-    async def start(self, services=None, execute_build=False, abort_on_exit=False, code_from=None):
+    async def start(
+        self,
+        services=None,
+        execute_build=False,
+        abort_on_exit=False,
+        code_from=None,
+        no_attach=None,
+        no_deps=False,
+    ):
         server_up = await self.check_server_is_running()
         if server_up:
-            return await self.run_client_session(self.make_start_session(services, execute_build))
+            return await self.run_client_session(self.make_start_session(services, execute_build, no_deps))
         else:
             return await self.watch_services(
                 start_services=services,
                 execute_build=execute_build,
                 abort_on_exit=abort_on_exit,
                 code_from=code_from,
+                no_attach=no_attach,
+                no_deps=no_deps,
             )
 
-    def make_start_session(self, services=None, request_build=False):
+    def make_start_session(self, services=None, request_build=False, no_deps=False):
         async def run_client_commands(session: aiohttp.ClientSession):
             response = await session.get(f"/")
             data = await response.json()
@@ -209,7 +219,7 @@ class Compose:
             for service in to_request:
                 response = await session.post(
                     f"/{project}/{service}/start",
-                    json={"request_build": request_build},
+                    json={"request_build": request_build, "no_deps": no_deps},
                 )
                 if response.status == 200:
                     print(service, await response.json())
@@ -1072,7 +1082,8 @@ class Compose:
         service = self._get_service(request)
         body = await self._get_json_or_empty(request)
         request_build = body.get("request_build", False)
-        for s in self.get_start_sequence([service]):
+        sequence = [service] if body.get("no_deps", False) else self.get_start_sequence([service])
+        for s in sequence:
             if request_build:
                 self.services[s].request_build()
             # Last one in the sequence should be `service`
@@ -1125,6 +1136,8 @@ class Compose:
         execute_clean=False,
         abort_on_exit=False,
         code_from=None,
+        no_attach=None,
+        no_deps=False,
     ):
         try:
             self.assure_service_config()
@@ -1157,6 +1170,7 @@ class Compose:
                     execute_build=execute_build,
                     execute_clean=execute_clean,
                     build_args=self.build_args,
+                    show_logs=(no_attach is None or len(no_attach) > 0 and name not in no_attach),
                 )
                 for (index, (name, service_config)) in enumerate(
                     self.service_config["services"].items()
@@ -1192,7 +1206,8 @@ class Compose:
                     )
                 start_services += additional
 
-            for name in self.get_start_sequence(start_services):
+            sequence = start_services if no_deps else self.get_start_sequence(start_services)
+            for name in sequence:
                 self.services[name].start()
 
             self.logger.debug("Waiting for services")
