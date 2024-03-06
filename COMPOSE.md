@@ -233,14 +233,14 @@ Commandline arguments:
 * `[x]` `--exit-code-from`
 * `[x]` `--no-attach`
 * `[x]` `--no-build`
-* `[ ]` `--no-color`
+* `[x]` `--no-color`
 * `[x]` `--no-deps`
-* `[ ]` `--no-log-prefix`
+* `[x]` `--no-log-prefix`
 * `[x]` `--no-start`		Don't start the services after creating them.
 * `[ ]` `--remove-orphans`
 * `[ ]` `--scale`
 * `[ ]` `-t|--timeout`
-* `[ ]` `--timestamps`
+* `[x]` `--timestamps`
 * `[ ]` `--wait`
 * `[ ]` `--wait-timeout`
 

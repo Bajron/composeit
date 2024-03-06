@@ -4,11 +4,9 @@ import asyncio
 import psutil
 import os
 import locale
-import sys
 import datetime
 import subprocess
 import time
-from termcolor import colored
 from .utils import duration_to_seconds, get_stack_string
 from .log_utils import LogKeeper, LogRecord
 from .service_config import (
@@ -21,17 +19,6 @@ from .service_config import (
 )
 
 from typing import List, Optional, Union, Dict, Any, Coroutine, Generator, Callable
-
-
-def make_colored(color):
-    def f(s):
-        return colored(s, color)
-
-    return f
-
-
-def not_colored(s):
-    return s
 
 
 RestartPolicyOptions = ["no", "always", "on-failure", "unless-stopped"]
@@ -57,7 +44,8 @@ class AsyncProcess:
         execute_build: bool = False,
         execute_clean: bool = False,
         build_args: Optional[Dict[str, str]] = None,
-        show_logs: bool = True,
+        process_log_handler: Optional[logging.Handler] = None,
+        service_log_handler: Optional[logging.Handler] = None,
     ):
         self.sequence: int = sequence
         self.name: str = name
@@ -95,15 +83,12 @@ class AsyncProcess:
         self.lerr_keeper = LogKeeper(window=30)
         self.log_keeper = LogKeeper(window=30)
 
-        if show_logs:
-            logHandler = logging.StreamHandler(stream=sys.stderr)
-            logHandler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
-            self._log.addHandler(logHandler)
+        if service_log_handler:
+            self._log.addHandler(service_log_handler)
 
-            streamHandler = logging.StreamHandler(stream=sys.stdout)
-            streamHandler.setFormatter(self.get_output_formatter())
-            self._lout.addHandler(streamHandler)
-            self._lerr.addHandler(streamHandler)
+        if process_log_handler:
+            self._lout.addHandler(process_log_handler)
+            self._lerr.addHandler(process_log_handler)
 
         self._log.addHandler(self.log_keeper)
         self._log.setLevel(logging.INFO)
@@ -171,10 +156,6 @@ class AsyncProcess:
             logger,
             extra={"color": self.color},
         )
-
-    def get_output_formatter(self):
-        color_wrap = make_colored(self.color) if self.color is not None else not_colored
-        return logging.Formatter(color_wrap("%(name)s %(message)s"))
 
     def request_clean(self):
         self.execute_clean = True
@@ -343,12 +324,6 @@ class AsyncProcess:
             )
         self.start_time = time.time()
         return process
-
-    def _output(self, sep: str, message: str):
-        s = f"{self.name}{sep} {message}"
-        if self.color is not None:
-            s = colored(s, self.color)
-        print(s, end="")
 
     async def watch_stderr(self, process: asyncio.subprocess.Process):
         if process.stderr is None:

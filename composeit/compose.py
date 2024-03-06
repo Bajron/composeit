@@ -15,6 +15,7 @@ import time
 from aiohttp import web, ClientConnectorError, ClientResponseError
 from json.decoder import JSONDecodeError
 from .service_config import get_signal, get_default_kill
+from .log_utils import ComposeFormatter, build_format
 from typing import List, Dict, Optional, Union, Iterable, Mapping
 
 from .log_utils import (
@@ -181,10 +182,15 @@ class Compose:
         code_from=None,
         no_attach=None,
         no_deps=False,
+        no_log_prefix=False,
+        no_color=False,
+        timestamps=False,
     ):
         server_up = await self.check_server_is_running()
         if server_up:
-            return await self.run_client_session(self.make_start_session(services, execute_build, no_deps))
+            return await self.run_client_session(
+                self.make_start_session(services, execute_build, no_deps)
+            )
         else:
             return await self.watch_services(
                 start_services=services,
@@ -193,6 +199,9 @@ class Compose:
                 code_from=code_from,
                 no_attach=no_attach,
                 no_deps=no_deps,
+                no_log_prefix=no_log_prefix,
+                no_color=no_color,
+                timestamps=timestamps,
             )
 
     def make_start_session(self, services=None, request_build=False, no_deps=False):
@@ -1138,6 +1147,9 @@ class Compose:
         code_from=None,
         no_attach=None,
         no_deps=False,
+        no_log_prefix=False,
+        no_color=False,
+        timestamps=False,
     ):
         try:
             self.assure_service_config()
@@ -1160,6 +1172,20 @@ class Compose:
             if start_server:
                 self.start_server()
 
+            service_log_handler = logging.StreamHandler(stream=sys.stderr)
+            service_log_handler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
+
+            process_log_handler = logging.StreamHandler(stream=sys.stdout)
+            process_log_format = build_format(use_prefix=not no_log_prefix, timestamps=timestamps)
+            process_log_handler.setFormatter(
+                ComposeFormatter(fmt=process_log_format, use_color=self.use_colors and not no_color)
+            )
+
+            show_logs = {
+                name: (no_attach is None or len(no_attach) > 0 and name not in no_attach)
+                for name in self.service_config["services"].keys()
+            }
+
             self.services = {
                 name: AsyncProcess(
                     index,
@@ -1170,7 +1196,8 @@ class Compose:
                     execute_build=execute_build,
                     execute_clean=execute_clean,
                     build_args=self.build_args,
-                    show_logs=(no_attach is None or len(no_attach) > 0 and name not in no_attach),
+                    process_log_handler=process_log_handler if show_logs[name] else None,
+                    service_log_handler=service_log_handler if show_logs[name] else None,
                 )
                 for (index, (name, service_config)) in enumerate(
                     self.service_config["services"].items()

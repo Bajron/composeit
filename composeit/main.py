@@ -88,7 +88,26 @@ def main():
         "--no-deps",
         default=False,
         action="store_true",
-        help="Do not start dependent services"
+        help="Do not start dependent services",
+    )
+    parser_up.add_argument(
+        "--no-log-prefix",
+        default=False,
+        action="store_true",
+        help="Do not print prefix in logs",
+    )
+    parser_up.add_argument(
+        "--timestamps",
+        default=False,
+        action="store_true",
+        help="Add timestamps to the logs",
+    )
+    parser_up.add_argument(
+        "--no-color",
+        dest="logs_no_color",
+        default=False,
+        action="store_true",
+        help="Do not use color in the output",
     )
     not_for_detached = ["-d", "--detach", "--abort-on-container-exit"]
 
@@ -402,6 +421,9 @@ def main():
                             code_from=options.exit_code_from,
                             no_attach=options.no_attach,
                             no_deps=options.no_deps,
+                            no_log_prefix=options.no_log_prefix,
+                            no_color=options.logs_no_color,
+                            timestamps=options.timestamps,
                         )
                     )
             elif options.command == "start":

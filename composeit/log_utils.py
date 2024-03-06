@@ -56,6 +56,40 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(json_object)
 
 
+class ComposeFormatter(logging.Formatter):
+    def __init__(
+        self,
+        fmt: Optional[str] = None,
+        datefmt: Optional[str] = None,
+        style: Literal["%", "{", "$"] = "%",
+        validate: bool = True,
+        use_color: bool = True,
+    ) -> None:
+        super().__init__(fmt, datefmt, style, validate)
+        self.use_color: bool = use_color
+
+    def usesColor(self):
+        return self.use_color
+
+    def format(self, record):
+        s = logging.Formatter.format(self, record)
+
+        if hasattr(record, "color") and self.usesColor():
+            return colored(s, record.color)
+        else:
+            return s
+
+
+def build_format(use_prefix=True, timestamps=False):
+    fmt_parts = []
+    if timestamps:
+        fmt_parts.append("%(asctime)s")
+    if use_prefix:
+        fmt_parts.append("%(name)s")
+    fmt_parts.append("%(message)s")
+    return " ".join(fmt_parts)
+
+
 def build_print_function(single, color=None, prefix=None, timestamps=None):
     default_color = True
     default_prefix = True
