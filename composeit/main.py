@@ -2,10 +2,13 @@ import argparse
 import pathlib
 import os
 import sys
+import platform
 import logging
 import dotenv
 import asyncio
 import subprocess
+import json
+import importlib.metadata
 
 from typing import Dict, Any
 
@@ -13,6 +16,24 @@ from .compose import Compose
 from .process import PossibleStates
 from .utils import get_stack_string, date_or_duration
 from .service_config import get_dict_from_env_list, get_signal, get_default_kill
+
+
+def show_version(format="simple", short=False):
+    v: Dict = {}
+    v["composeit"] = importlib.metadata.version("composeit")
+    if not short:
+        v["system"] = platform.platform()
+        v["python"] = {"version": sys.version, "platform": sys.platform, "os": os.name}
+
+    if format == "json":
+        json.dump(v, fp=sys.stdout, indent=2)
+    else:
+        if short:
+            print(v["composeit"])
+        else:
+            print(f"composeit: {v['composeit']}")
+            print(f"system: {v['system']}")
+            print(f"python: {v['python']['version']}")
 
 
 def main():
@@ -314,6 +335,18 @@ def main():
         help="Disables path resolution",
     )
 
+    parser_version = subparsers.add_parser("version", help="Show version")
+    parser_version.add_argument(
+        "--format",
+        "-f",
+        default="pretty",
+        choices=["pretty", "json"],
+        help="Format output",
+    )
+    parser_version.add_argument(
+        "--short", default=False, action="store_true", help="Show only composeit version"
+    )
+
     options = parser.parse_args()
 
     if options.verbose:
@@ -395,7 +428,13 @@ def main():
             "stop",
             "down",
             "config",
+            "version",
         ]
+
+        if options.command == "version":
+            show_version(options.format, options.short)
+            return 0
+
         compose = Compose(
             project_name,
             working_directory,

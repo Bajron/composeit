@@ -31,6 +31,7 @@ def test_no_abort_on_exit(process_cleaner):
         assert up.returncode == None
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
+        up.wait(5)
 
 
 def test_return_code(process_cleaner):
