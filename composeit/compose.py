@@ -93,7 +93,7 @@ class Compose:
         self.depending: Optional[Mapping[str, Iterable[str]]] = None
         self.depends: Optional[Mapping[str, Iterable[str]]] = None
 
-        self.shutdown_timeout:float = timeout
+        self.shutdown_timeout: float = timeout
 
         if not defer_config_load:
             self.load_service_config()
@@ -171,7 +171,7 @@ class Compose:
 
     async def build(self, services=None):
         return await self.watch_services(
-            start_server=False, start_services=services, execute=False, execute_build=True
+            start_server=False, services=services, execute=False, execute_build=True
         )
 
     async def up(self, services=None, no_build=False, **kwargs):
@@ -183,6 +183,8 @@ class Compose:
         execute_build=False,
         abort_on_exit=False,
         code_from=None,
+        attach=None,
+        attach_dependencies=False,
         no_attach=None,
         no_deps=False,
         no_log_prefix=False,
@@ -196,10 +198,12 @@ class Compose:
             )
         else:
             return await self.watch_services(
-                start_services=services,
+                services=services,
                 execute_build=execute_build,
                 abort_on_exit=abort_on_exit,
                 code_from=code_from,
+                attach=attach,
+                attach_dependencies=attach_dependencies,
                 no_attach=no_attach,
                 no_deps=no_deps,
                 no_log_prefix=no_log_prefix,
@@ -898,11 +902,11 @@ class Compose:
         if add_context:
             self.services[service].feed_handler(logs_to_response, tail=tail)
 
-        self.services[service].attach_log_handler(logs_to_response)
+        self.services[service].attach_log_handlers(logs_to_response, logs_to_response)
 
         def detach_logger(fut):
             self.logger.debug(f"Detaching log sender from {service}")
-            self.services[service].detach_log_handler(logs_to_response)
+            self.services[service].detach_log_handlers(logs_to_response, logs_to_response)
 
         assert response.task is not None
         response.task.add_done_callback(detach_logger)
@@ -982,12 +986,12 @@ class Compose:
 
         if follow or until is not None and until > now:
             for s in services:
-                self.services[s].attach_log_handler(logs_to_response)
+                self.services[s].attach_log_handlers(logs_to_response, logs_to_response)
 
             def detach_loggers(fut):
                 for s in services:
                     self.logger.debug(f"Detaching log sender from {s}")
-                    self.services[s].detach_log_handler(logs_to_response)
+                    self.services[s].detach_log_handlers(logs_to_response, logs_to_response)
 
             assert response.task is not None
             response.task.add_done_callback(detach_loggers)
@@ -1149,13 +1153,15 @@ class Compose:
 
     async def watch_services(
         self,
-        start_services=None,
+        services: Optional[List[str]] = None,
         start_server=True,
         execute=True,
         execute_build=False,
         execute_clean=False,
         abort_on_exit=False,
         code_from=None,
+        attach=None,
+        attach_dependencies=False,
         no_attach=None,
         no_deps=False,
         no_log_prefix=False,
@@ -1180,6 +1186,25 @@ class Compose:
                 shared_logging_config["disable_existing_loggers"] = False
                 logging.config.dictConfig(config=shared_logging_config)
 
+            # NOTE: All services are prepared, not all of them are started.
+            #       Preparing services early so other methods can use them.
+            self.services = {
+                name: AsyncProcess(
+                    index,
+                    name,
+                    service_config,
+                    self._get_next_color(),
+                    execute=execute,
+                    execute_build=execute_build,
+                    execute_clean=execute_clean,
+                    build_args=self.build_args,
+                    verbose=self.verbose,
+                )
+                for (index, (name, service_config)) in enumerate(
+                    self.service_config["services"].items()
+                )
+            }
+
             if start_server:
                 self.start_server()
 
@@ -1192,32 +1217,38 @@ class Compose:
                 ComposeFormatter(fmt=process_log_format, use_color=self.use_colors and not no_color)
             )
 
-            show_logs = {
-                name: (no_attach is None or len(no_attach) > 0 and name not in no_attach)
-                for name in self.service_config["services"].keys()
-            }
+            if services is None:
+                input_services = list(self.service_config["services"].keys())
+                start_services = input_services.copy()
+            else:
+                input_services = services.copy()
+                additional = self.get_always_restart_services()
+                if len(additional) > 0:
+                    self.logger.debug(
+                        f"Services with restart policy 'always' are started as well: {additional}"
+                    )
+                start_services = input_services + additional
 
-            self.services = {
-                name: AsyncProcess(
-                    index,
-                    name,
-                    service_config,
-                    self._get_next_color(),
-                    execute=execute,
-                    execute_build=execute_build,
-                    execute_clean=execute_clean,
-                    build_args=self.build_args,
-                    process_log_handler=process_log_handler if show_logs[name] else None,
-                    service_log_handler=service_log_handler if show_logs[name] else None,
-                )
-                for (index, (name, service_config)) in enumerate(
-                    self.service_config["services"].items()
-                )
-            }
+            # Restart "always" are treated as dependency for the logs
+            log_services = (
+                self.get_start_sequence(start_services) if attach_dependencies else input_services
+            )
+            if attach is not None:
+                log_services += attach
 
-            if self.verbose:
-                for s in self.services.values():
-                    s.log.setLevel(logging.DEBUG)
+            show_logs = {}
+            for name in log_services:
+                no_attach_allows = no_attach is None or (
+                    len(no_attach) > 0 and name not in no_attach
+                )
+                # Attach_dependencies disables attach limiting behavior
+                attach_allows = attach_dependencies or attach is None or name in attach
+                show_logs[name] = no_attach_allows and attach_allows
+
+            for name in [name for name, show in show_logs.items() if show]:
+                self.services[name].feed_handler(service_log_handler, service=True, process=False)
+                self.services[name].feed_handler(process_log_handler, service=False, process=True)
+                self.services[name].attach_log_handlers(process_log_handler, service_log_handler)
 
             async def on_exit_aborter(source_service: AsyncProcess):
                 self.logger.debug(f"Aborting after {source_service.name} stop")
@@ -1233,16 +1264,6 @@ class Compose:
             signal.signal(signal.SIGINT, signal_handler)
             # Well, this is not implemented for Windows
             # asyncio.get_event_loop().add_signal_handler(signal.SIGINT, signal_handler)
-
-            if start_services is None:
-                start_services = list(self.services.keys())
-            else:
-                additional = self.get_always_restart_services()
-                if len(additional) > 0:
-                    self.logger.debug(
-                        f"Services with restart policy 'always' are started as well: {additional}"
-                    )
-                start_services += additional
 
             sequence = start_services if no_deps else self.get_start_sequence(start_services)
             for name in sequence:

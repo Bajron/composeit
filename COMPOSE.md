@@ -225,11 +225,12 @@ Not implemented. Maybe if there is pause...
 Commandline arguments:
 * `[x]` `--abort-on-container-exit`
 * `[ ]` `--always-recreate-deps`
-* `[ ]` `--attach`
-* `[ ]` `--attach-dependencies`
+* `[x]` `--attach`
+* `[x]` `--attach-dependencies`
 * `[x]` `--build`
 * `[x]` `--build-arg`
 * `[~]` `-d|--detach`
+* `[ ]` `--force-recreate` Stop and build
 * `[x]` `--exit-code-from`
 * `[x]` `--no-attach`
 * `[x]` `--no-build`
@@ -238,7 +239,7 @@ Commandline arguments:
 * `[x]` `--no-log-prefix`
 * `[x]` `--no-start`		Don't start the services after creating them.
 * `[ ]` `--remove-orphans`
-* `[ ]` `--scale`
+* `[ ]` `--scale` Maybe some day
 * `[x]` `-t|--timeout`
 * `[x]` `--timestamps`
 * `[ ]` `--wait`

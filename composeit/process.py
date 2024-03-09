@@ -46,6 +46,7 @@ class AsyncProcess:
         build_args: Optional[Dict[str, str]] = None,
         process_log_handler: Optional[logging.Handler] = None,
         service_log_handler: Optional[logging.Handler] = None,
+        verbose: bool = False,
     ):
         self.sequence: int = sequence
         self.name: str = name
@@ -78,6 +79,8 @@ class AsyncProcess:
         self.lout: logging.LoggerAdapter = self._adapt_logger(self._lout)
         self.lerr: logging.LoggerAdapter = self._adapt_logger(self._lerr)
         self.log: logging.LoggerAdapter = self._adapt_logger(self._log)
+        if verbose:
+            self.log.setLevel(logging.DEBUG)
 
         self.lout_keeper = LogKeeper(window=30)
         self.lerr_keeper = LogKeeper(window=30)
@@ -210,20 +213,30 @@ class AsyncProcess:
     def feed_handler(
         self,
         handler: logging.StreamHandler,
+        service=True,
+        process=True,
         since: Optional[datetime.datetime] = None,
         until: Optional[datetime.datetime] = None,
         tail: Optional[int] = None,
     ):
-        for r in self.get_log_context(since, until, tail):
+        for r in self.get_log_context(service, process, since, until, tail):
             handler.emit(r)
 
     def get_log_context(
         self,
+        service=True,
+        process=True,
         since: Optional[datetime.datetime] = None,
         until: Optional[datetime.datetime] = None,
         tail: Optional[int] = None,
     ) -> Generator[LogRecord, None, None]:
-        log_context = self.lerr_keeper.window + self.lout_keeper.window + self.log_keeper.window
+        log_context = []
+        if service:
+            log_context += self.log_keeper.window
+        if process:
+            log_context += self.lerr_keeper.window
+            log_context += self.lout_keeper.window
+
         if len(log_context) == 0:
             return
 
@@ -243,17 +256,31 @@ class AsyncProcess:
                 break
             yield r
 
-    def attach_log_handler(self, handler: logging.StreamHandler):
-        self.log.debug(f"Logger attached {handler}")
-        self._log.addHandler(handler)
-        self._lout.addHandler(handler)
-        self._lerr.addHandler(handler)
+    def attach_log_handlers(
+        self,
+        process_log_handler: Optional[logging.Handler] = None,
+        service_log_handler: Optional[logging.Handler] = None,
+    ):
+        if service_log_handler:
+            self._log.addHandler(service_log_handler)
+            self.log.debug(f"Service logger attached {service_log_handler}")
+        if process_log_handler:
+            self._lout.addHandler(process_log_handler)
+            self._lerr.addHandler(process_log_handler)
+            self.log.debug(f"Process logger attached {service_log_handler}")
 
-    def detach_log_handler(self, handler: logging.StreamHandler):
-        self.log.debug(f"Logger detached {handler}")
-        self._log.removeHandler(handler)
-        self._lout.removeHandler(handler)
-        self._lerr.removeHandler(handler)
+    def detach_log_handlers(
+        self,
+        process_log_handler: Optional[logging.Handler] = None,
+        service_log_handler: Optional[logging.Handler] = None,
+    ):
+        if process_log_handler:
+            self._lout.removeHandler(process_log_handler)
+            self._lerr.removeHandler(process_log_handler)
+            self.log.debug(f"Process logger detached {process_log_handler}")
+        if service_log_handler:
+            self._log.removeHandler(service_log_handler)
+            self.log.debug(f"Service logger detached {service_log_handler}")
 
     def _get_command(self) -> Union[str, List[str]]:
         return get_command(self.service_config, self.log)

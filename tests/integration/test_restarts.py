@@ -8,7 +8,9 @@ def test_restarting(process_cleaner):
 
     try:
         up = subprocess.Popen(
-            ["composeit", "--verbose", "up", "one_shot"], cwd=service_directory, stdout=subprocess.PIPE
+            ["composeit", "--verbose", "up", "one_shot"],
+            cwd=service_directory,
+            stdout=subprocess.PIPE,
         )
         process_cleaner.append(up)
 
@@ -18,7 +20,10 @@ def test_restarting(process_cleaner):
         ShowLogs(up.stdout)
 
         # always policy brings the service up on each server start (note we started only "one_shot")
-        states = ps(service_directory)
+        for _ in range(3):
+            states = ps(service_directory)
+            if states and states["always"] == "up":
+                break
         assert states["always"] == "up"
 
         subprocess.call(["composeit", "stop", "always"], cwd=service_directory)

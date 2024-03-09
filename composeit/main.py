@@ -73,6 +73,15 @@ def main():
         help="Return the exit code of the selected service",
     )
     parser_up.add_argument(
+        "--attach", default=None, nargs="+", help="Attach only to the listed services"
+    )
+    parser_up.add_argument(
+        "--attach-dependencies",
+        default=False,
+        action="store_true",
+        help="Attach to dependencies logs",
+    )
+    parser_up.add_argument(
         "--no-attach",
         default=None,
         nargs="*",
@@ -419,6 +428,8 @@ def main():
                             no_build=options.no_build,
                             abort_on_exit=options.abort_on_service_exit,
                             code_from=options.exit_code_from,
+                            attach=options.attach,
+                            attach_dependencies=options.attach_dependencies,
                             no_attach=options.no_attach,
                             no_deps=options.no_deps,
                             no_log_prefix=options.no_log_prefix,
