@@ -247,16 +247,18 @@ Commandline arguments:
 
 ## version
 
+Show composeit version and the system version.
+
 Commandline arguments:
-* `[ ]` `-f|--format`
-* `[ ]` `--short`
+* `[x]` `-f|--format`
+* `[x]` `--short`
 
 ## wait
 
-Not implemented yet.
+Wait for any of the services to stop
 
 Commandline arguments:
-* `[ ]` `--down-project`
+* `[x]` `--down-project`
 
 ## _watch_
 

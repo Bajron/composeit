@@ -347,6 +347,15 @@ def main():
         "--short", default=False, action="store_true", help="Show only composeit version"
     )
 
+    parser_wait = subparsers.add_parser("wait", help="Block until the first service stops")
+    parser_wait.add_argument("service", nargs="*", help="Specific services to wait for")
+    parser_wait.add_argument(
+        "--down-project",
+        default=False,
+        action="store_true",
+        help="Down project when service stops",
+    )
+
     options = parser.parse_args()
 
     if options.verbose:
@@ -557,6 +566,8 @@ def main():
                 )
             elif options.command == "top":
                 return asyncio.run(compose.top(services))
+            elif options.command == "wait":
+                return asyncio.run(compose.wait(services, down_project=options.down_project))
             else:
                 cfg_log.error(f"Unhandled option {options.command}")
                 return 10

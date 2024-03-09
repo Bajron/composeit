@@ -839,6 +839,42 @@ class Compose:
 
         return client_session
 
+    async def wait(self, services=None, down_project=False):
+        server_up = await self.check_server_is_running()
+        if server_up:
+            return await self.run_client_session(self.make_wait_session(services, down_project))
+        else:
+            self.logger.error("Server is not running")
+            return 1
+
+    def make_wait_session(self, services: Optional[List[str]] = None, down_project=False):
+        async def client_session(session: aiohttp.ClientSession):
+            async with session.get(f"/") as response:
+                compose_data = await response.json()
+                project = compose_data["project_name"]
+
+            nonlocal services
+            if services is None:
+                async with session.get(f"/{project}") as response:
+                    project_data = await response.json()
+                    services = project_data["services"]
+
+            any_service_down = False
+            while not any_service_down:
+                service_data = []
+                for s in services:
+                    async with session.get(f"/{project}/{s}") as response:
+                        service_data.append(await response.json())
+
+                any_service_down = any([s["state"] == "stopped" for s in service_data])
+
+            if any_service_down and down_project:
+                self.logger.info("Shutting down after a service went down")
+                await self.down()
+
+            return 0
+
+        return client_session
 
     def get_call_json(self):
         return {
