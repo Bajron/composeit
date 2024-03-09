@@ -120,7 +120,21 @@ def main():
         default=10.0,
         help="Shutdown timeout for services",
     )
-    not_for_detached = ["-d", "--detach", "--abort-on-container-exit"]
+    parser_up.add_argument(
+        "--wait",
+        default=False,
+        action="store_true",
+        help="Wait for the services to be up/healthy. Implies detached mode.",
+    )
+    parser_up.add_argument(
+        "--wait-timeout",
+        default=None,
+        type=float,
+        help="Maximal wait time for services",
+    )
+
+    # --wait-timeout makes no sense, but requires also the following value filtering
+    not_for_detached = ["-d", "--detach", "--abort-on-container-exit", "--wait"]
 
     parser_start = subparsers.add_parser("start", help="Startup the services")
     parser_start.add_argument("service", nargs="*", help="Specific service to start")
@@ -401,13 +415,18 @@ def main():
                 services = []
 
             if options.command == "up":
-                if options.detach:
-                    up = sys.argv.index("up")
+                if options.detach or options.wait:
                     without_detach = lambda x: x not in not_for_detached
+                    up = sys.argv.index("up")
                     filtered_argv = sys.argv[:up] + list(filter(without_detach, sys.argv[up:]))
+                    if "--wait-timeout" in filtered_argv:
+                        wt = filtered_argv.index("--wait-timeout")
+                        filtered_argv = filtered_argv[:wt] + filtered_argv[wt + 2 :]
 
                     popen_kw: Dict[str, Any] = {}
                     if os.name == "nt":
+                        # subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+                        # FIXME: closing parent still takes the process down...
                         popen_kw.update(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
                     else:
                         popen_kw.update(start_new_session=True)
@@ -419,7 +438,20 @@ def main():
                         cwd=original_working_directory,
                         **popen_kw,
                     )
-                    return
+
+                    if options.wait:
+                        try:
+                            asyncio.run(
+                                asyncio.wait_for(
+                                    compose.wait_for_up(services=services),
+                                    timeout=options.wait_timeout,
+                                )
+                            )
+                            return 0
+                        except asyncio.TimeoutError:
+                            return 1
+
+                    return 0
                 else:
                     compose.shutdown_timeout = options.timeout
                     return asyncio.run(

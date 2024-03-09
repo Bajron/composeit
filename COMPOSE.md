@@ -238,12 +238,12 @@ Commandline arguments:
 * `[x]` `--no-deps`
 * `[x]` `--no-log-prefix`
 * `[x]` `--no-start`		Don't start the services after creating them.
-* `[ ]` `--remove-orphans`
+* `[ ]` `--remove-orphans` When config update is supported
 * `[ ]` `--scale` Maybe some day
 * `[x]` `-t|--timeout`
 * `[x]` `--timestamps`
-* `[ ]` `--wait`
-* `[ ]` `--wait-timeout`
+* `[x]` `--wait`
+* `[x]` `--wait-timeout`
 
 ## version
 

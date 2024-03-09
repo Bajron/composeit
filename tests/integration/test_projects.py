@@ -22,6 +22,37 @@ def test_up_simple_down_on_side(process_cleaner):
     assert rc is not None
 
 
+def test_blocking_up():
+    service_directory = tests_directory / "projects" / "simple"
+    try:
+        code = subprocess.call(
+            ["composeit", "up", "--wait", "--wait-timeout", "10"],
+            cwd=service_directory,
+        )
+        assert code == 0
+
+        services = ps(service_directory)
+        assert all(s == "up" for s in services.values())
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+
+
+def test_blocking_up_single_service():
+    service_directory = tests_directory / "projects" / "simple"
+    try:
+        code = subprocess.call(
+            ["composeit", "up", "simple1", "--wait", "--wait-timeout", "10"],
+            cwd=service_directory,
+        )
+        assert code == 0
+
+        services = ps(service_directory)
+        assert services["simple1"] == "up"
+        assert services["simple2"] != "up"
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+
+
 def test_diagnostic_on_side(process_cleaner):
     service_directory = tests_directory / "projects" / "simple"
 

@@ -8,7 +8,7 @@ def test_up_simple_detached_down_on_side():
     subprocess.call(["composeit", "down"], cwd=service_directory)
 
     try:
-        subprocess.call(["composeit", "up", "-d"], cwd=service_directory, stdout=subprocess.PIPE)
+        subprocess.call(["composeit", "up", "-d"], cwd=service_directory)
 
         for _ in range(10):
             states = ps(service_directory)
@@ -25,7 +25,7 @@ def test_up_simple_detached_down_on_side_cwd():
     subprocess.call(["composeit", "down"], cwd=service_directory)
 
     try:
-        subprocess.call(["composeit", "-f", str(service_file), "up", "-d"], stdout=subprocess.PIPE)
+        subprocess.call(["composeit", "-f", str(service_file), "up", "-d"])
 
         for _ in range(10):
             states = ps(service_directory)
