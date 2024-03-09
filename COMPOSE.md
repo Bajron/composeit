@@ -5,6 +5,32 @@ This file tracks features mimicked from the [docker-compose](https://docs.docker
 Commandline and schema lists are prefixed with a checkbox that serves as a TODO tracking.
 This way features that potentially make sense are signalled and tracked.
 
+## Basic functionality
+
+Commandline arguments
+* `[ ]` `--ansi`
+* `[ ]` `--dry-run`
+* `[x]` `--env-file`
+* `[x]` `-f`, `--file`
+* `[ ]` `--parallel`
+* `[ ]` `--profile` (start services with matching `profiles`)
+* `[ ]` `--progress`
+* `[x]` `--project-directory`
+* `[x]` `-p`, `--project-name`
+
+Environment variables
+* `[x]` `COMPOSEIT_FILE`
+* `[ ]` `COMPOSEIT_PARALLEL_LIMIT`
+* `[ ]` `COMPOSEIT_PROFILES`
+* `[ ]` `COMPOSEIT_IGNORE_ORPHANS`
+* `[x]` `COMPOSEIT_PROJECT_NAME`
+
+Service keys:
+* `[ ]` `profile`
+
+Top level keys:
+* `[ ]` `name`: sets project name
+
 ## build
 
 This option is reused to provide a way to prepare the process to run.

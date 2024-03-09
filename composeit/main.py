@@ -390,6 +390,8 @@ def main():
     file_choices = ["composeit.yml", "composeit.yaml"]
     if len(options.file) > 0:
         service_files = [f.absolute() for f in options.file]
+    elif "COMPOSEIT_FILE" in os.environ:
+        service_files = [f.strip() for f in os.environ["COMPOSEIT_FILE"].split(",")]
     else:
         for f in file_choices:
             if (working_directory / f).exists():
@@ -399,7 +401,17 @@ def main():
             service_files = [working_directory / file_choices[0]]
     cfg_log.debug(f"Service file: {service_files}")
 
-    project_name = options.project_name if options.project_name else working_directory.name
+    # TODO: possibility of setting it from yaml (`name: `)
+    project_name = (
+        options.project_name
+        if options.project_name
+        else os.environ.get(
+            "COMPOSEIT_PROJECT_NAME",
+            service_files[0].parent.name if len(service_files) > 0 else working_directory.name,
+        )
+    )
+
+    # TODO: project name validation
 
     cfg_log.debug(f"Project name: {project_name}")
 
