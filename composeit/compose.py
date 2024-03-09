@@ -68,6 +68,7 @@ class Compose:
         use_color: bool = True,
         defer_config_load: bool = False,
         build_args: Optional[Dict[str, str]] = None,
+        timeout: float = 10,
     ) -> None:
         self.project_name: str = project_name
         self.working_directory: pathlib.Path = working_directory
@@ -91,6 +92,8 @@ class Compose:
 
         self.depending: Optional[Mapping[str, Iterable[str]]] = None
         self.depends: Optional[Mapping[str, Iterable[str]]] = None
+
+        self.shutdown_timeout:float = timeout
 
         if not defer_config_load:
             self.load_service_config()
@@ -1124,7 +1127,7 @@ class Compose:
             run_server(self.app, self.logger.getChild("http"), self.communication_pipe)
         )
 
-    async def shutdown(self, request_clean=False):
+    async def shutdown(self, request_clean=False, retry_on_timeout=True):
         try:
             self.logger.info(" *** Calling terminate on sub processes")
             await_list = []
@@ -1132,7 +1135,15 @@ class Compose:
                 if request_clean:
                     self.services[service].request_clean()
                 await_list.append(self.services[service].terminate())
-            await asyncio.gather(*await_list)
+
+            try:
+                self.logger.info(f"Waiting {self.shutdown_timeout}s for stop")
+                await asyncio.wait_for(asyncio.gather(*await_list), timeout=self.shutdown_timeout)
+            except asyncio.TimeoutError:
+                self.logger.warning("Shutdown timeout")
+                if retry_on_timeout:
+                    # Note: second shutdown should trigger instant kill, no retry to break recursion
+                    self.shutdown(request_clean=request_clean, retry_on_timeout=False)
         except Exception as ex:
             self.logger.error(f"Exception during shutdown: {ex}, {get_stack_string()}")
 

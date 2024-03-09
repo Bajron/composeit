@@ -239,7 +239,7 @@ Commandline arguments:
 * `[x]` `--no-start`		Don't start the services after creating them.
 * `[ ]` `--remove-orphans`
 * `[ ]` `--scale`
-* `[ ]` `-t|--timeout`
+* `[x]` `-t|--timeout`
 * `[x]` `--timestamps`
 * `[ ]` `--wait`
 * `[ ]` `--wait-timeout`

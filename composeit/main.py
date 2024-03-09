@@ -78,12 +78,7 @@ def main():
         nargs="*",
         help="Hide logs from certain services",
     )
-    parser_up.add_argument(
-        "--no-build",
-        default=False,
-        action="store_true",
-        help="Do not build"
-    )
+    parser_up.add_argument("--no-build", default=False, action="store_true", help="Do not build")
     parser_up.add_argument(
         "--no-deps",
         default=False,
@@ -109,6 +104,13 @@ def main():
         action="store_true",
         help="Do not use color in the output",
     )
+    parser_up.add_argument(
+        "--timeout",
+        "-t",
+        type=float,
+        default=10.0,
+        help="Shutdown timeout for services",
+    )
     not_for_detached = ["-d", "--detach", "--abort-on-container-exit"]
 
     parser_start = subparsers.add_parser("start", help="Startup the services")
@@ -120,10 +122,7 @@ def main():
         help="Do not start services. Daemon stays started.",
     )
     parser_start.add_argument(
-        "--no-deps",
-        default=False,
-        action="store_true",
-        help="Do not start dependent services"
+        "--no-deps", default=False, action="store_true", help="Do not start dependent services"
     )
 
     parser_build = subparsers.add_parser("build", help="Build the services")
@@ -413,6 +412,7 @@ def main():
                     )
                     return
                 else:
+                    compose.shutdown_timeout = options.timeout
                     return asyncio.run(
                         compose.up(
                             services,
