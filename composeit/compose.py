@@ -62,6 +62,7 @@ class Compose:
         project_name: str,
         working_directory: pathlib.Path,
         service_files: ServiceFiles,
+        profiles: Optional[List[str]],
         verbose: bool = False,
         use_color: bool = True,
         defer_config_load: bool = False,
@@ -88,6 +89,8 @@ class Compose:
         self.service_files: ServiceFiles = service_files
         self.service_config: Optional[dict] = None
 
+        self.profiles: List[str] = profiles or []
+
         self.depending: Optional[Mapping[str, Iterable[str]]] = None
         self.depends: Optional[Mapping[str, Iterable[str]]] = None
 
@@ -113,6 +116,13 @@ class Compose:
         self.assure_service_config()
         assert self.service_config is not None
         return self.service_config["services"] or {}
+
+    def get_defaults_services(self) -> Iterable[str]:
+        return [
+            key
+            for key, service in self.get_services_configs().items()
+            if "profile" not in service or service["profile"] in self.profiles
+        ]
 
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
@@ -229,7 +239,10 @@ class Compose:
                         continue
                     to_request.append(service)
             else:
-                to_request = existing_services
+                to_request = data["default_services"]
+                # TODO: this^^ is for no profile provided locally
+                #       with local --profile need to send to server and use matching list
+                # TODO: here and other places
 
             bad_responses = 0
             for service in to_request:
@@ -826,7 +839,7 @@ class Compose:
             if services is None:
                 async with session.get(f"/{project}") as response:
                     project_data = await response.json()
-                    services = project_data["services"]
+                    services = project_data["default_services"]
 
             all_services_up = False
             while not all_services_up:
@@ -857,7 +870,7 @@ class Compose:
             if services is None:
                 async with session.get(f"/{project}") as response:
                     project_data = await response.json()
-                    services = project_data["services"]
+                    services = project_data["default_services"]
 
             any_service_down = False
             while not any_service_down:
@@ -888,7 +901,10 @@ class Compose:
         return web.json_response(self.get_call_json())
 
     def get_project_json(self):
-        return {"services": [k for k in self.services.keys()]}
+        return {
+            "services": list(self.services.keys()),
+            "default_services": list(self.get_defaults_services()),
+        }
 
     def _get_project(self, request: web.Request):
         project = request.match_info.get("project", "")
@@ -1101,6 +1117,7 @@ class Compose:
         body = await self._get_json_or_empty(request)
         services = body.get("services")
         if services is None:
+            # TODO: default_services + started
             services = list(self.services.keys())
 
         sequence = services if body.get("no_deps", False) else self.get_stop_sequence(services)
@@ -1285,7 +1302,7 @@ class Compose:
             )
 
             if services is None:
-                input_services = list(self.get_services_configs().keys())
+                input_services = list(self.get_defaults_services())
                 start_services = input_services.copy()
             else:
                 input_services = services.copy()

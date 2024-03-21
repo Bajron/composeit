@@ -1,0 +1,12 @@
+services:
+  simple1:
+    command: [python, ../../counter.py, --time, '0.1']
+  simple2a:
+    profile: a
+    command: [python, ../../counter.py, --time, '0.1']
+  simple2aa:
+    profile: a
+    command: [python, ../../counter.py, --time, '0.1']
+  simple2b:
+    profile: b
+    command: [python, ../../counter.py, --time, '0.1']

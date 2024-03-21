@@ -55,6 +55,13 @@ def main():
     parser.add_argument(
         "--project-directory", default=None, type=pathlib.Path, help="Alternate working directory"
     )
+    parser.add_argument(
+        "--profile",
+        default=[],
+        action="append",
+        type=str,
+        help="Profile to activate (services sets)",
+    )
     parser.add_argument("--env-file", default=[], action="append", type=pathlib.Path)
     parser.add_argument("--verbose", default=False, action="store_true")
     parser.add_argument("--no-color", default=False, action="store_true")
@@ -471,6 +478,7 @@ def main():
             project_name,
             working_directory,
             service_files,
+            profiles=options.profile,
             verbose=options.verbose,
             use_color=use_color,
             defer_config_load=defer_config_load,
