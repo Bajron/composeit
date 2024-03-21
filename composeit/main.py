@@ -8,6 +8,7 @@ import dotenv
 import asyncio
 import subprocess
 import json
+import re
 import importlib.metadata
 
 from typing import Dict, Any
@@ -15,7 +16,7 @@ from typing import Dict, Any
 from .compose import Compose
 from .process import PossibleStates
 from .utils import get_stack_string, date_or_duration
-from .service_config import get_dict_from_env_list, get_signal, get_default_kill
+from .service_config import ServiceFiles, get_dict_from_env_list, get_signal, get_default_kill
 
 
 def show_version(format="simple", short=False):
@@ -379,6 +380,10 @@ def main():
         cfg_log.debug(f'Running `os.system("color")`')
         os.system("color")
 
+    if options.command == "version":
+        show_version(options.format, options.short)
+        return 0
+
     working_directory = pathlib.Path(os.getcwd())
     if options.project_directory:
         working_directory = options.project_directory
@@ -389,29 +394,39 @@ def main():
 
     file_choices = ["composeit.yml", "composeit.yaml"]
     if len(options.file) > 0:
-        service_files = [f.absolute() for f in options.file]
+        config_paths = [f.absolute() for f in options.file]
     elif "COMPOSEIT_FILE" in os.environ:
-        service_files = [f.strip() for f in os.environ["COMPOSEIT_FILE"].split(",")]
+        config_paths = [f.strip() for f in os.environ["COMPOSEIT_FILE"].split(",")]
     else:
         for f in file_choices:
             if (working_directory / f).exists():
-                service_files = [working_directory / f]
+                config_paths = [working_directory / f]
                 break
         else:
-            service_files = [working_directory / file_choices[0]]
-    cfg_log.debug(f"Service file: {service_files}")
+            config_paths = [working_directory / file_choices[0]]
 
-    # TODO: possibility of setting it from yaml (`name: `)
-    project_name = (
-        options.project_name
-        if options.project_name
-        else os.environ.get(
-            "COMPOSEIT_PROJECT_NAME",
-            service_files[0].parent.name if len(service_files) > 0 else working_directory.name,
+    cfg_log.debug(f"Service file: {config_paths}")
+    service_files = ServiceFiles(config_paths)
+
+    project_name = options.project_name
+    if project_name is None:
+        project_name = os.environ.get("COMPOSEIT_PROJECT_NAME", None)
+    if project_name is None:
+        project_name = service_files.get_project_name()
+    if project_name is None:
+        project_name = (
+            service_files.paths[0].parent.name
+            if len(service_files.paths) > 0
+            else working_directory.name
         )
-    )
 
-    # TODO: project name validation
+    if re.fullmatch(r"^[0-9a-z][0-9a-z_-]*$", project_name) is None:
+        print(
+            f"Project name ({project_name}) is invalid. "
+            + "Use lowercase letters, digits, dashes and underscores.",
+            file=sys.stderr,
+        )
+        return 1
 
     cfg_log.debug(f"Project name: {project_name}")
 
@@ -451,10 +466,6 @@ def main():
             "config",
             "version",
         ]
-
-        if options.command == "version":
-            show_version(options.format, options.short)
-            return 0
 
         compose = Compose(
             project_name,

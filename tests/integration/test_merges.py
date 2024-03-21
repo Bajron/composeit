@@ -54,6 +54,7 @@ def test_merging_env_and_args(process_cleaner, f1, f2, print_sequence):
             ["composeit", *args, "start", "--no-start"],
             cwd=service_directory,
         )
+        process_cleaner.append(up)
 
         wait_for_ps(service_directory)
 

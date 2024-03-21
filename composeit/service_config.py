@@ -4,8 +4,52 @@ import os
 import shutil
 import dotenv
 import io
+import yaml
+from pathlib import Path
 from .utils import update_dict
 from typing import Union, List, Optional, Dict, overload
+
+
+class ServiceFiles:
+    def __init__(self, service_files: List[Path]) -> None:
+        self.paths: List[Path] = service_files
+        self.loaded_files: Optional[List[dict]] = None
+
+    def get_project_name(self) -> Optional[str]:
+        self._assure_loaded()
+        assert self.loaded_files is not None
+        for d in reversed(self.loaded_files):
+            if d is not None and "name" in d:
+                return d["name"]
+        return None
+
+    def get_parsed_files(self) -> List[dict]:
+        self._assure_loaded()
+        assert self.loaded_files is not None
+        return self.loaded_files
+
+    def _assure_loaded(self):
+        if self.loaded_files is None:
+            self._load_files()
+
+    def _load_files(self):
+        self.loaded_files = [
+            yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.paths
+        ]
+
+
+# https://gist.github.com/pypt/94d747fe5180851196eb
+class UniqueKeyLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        mapping = set()
+        for key_node, value_node in node.value:
+            if ":merge" in key_node.tag:
+                continue
+            key = self.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise ValueError(f"Duplicate {key!r} key found in YAML.")
+            mapping.add(key)
+        return super().construct_mapping(node, deep)
 
 
 def get_stop_signal(config: dict) -> signal.Signals:

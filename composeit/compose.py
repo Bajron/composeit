@@ -1,4 +1,3 @@
-import yaml
 import json
 import asyncio
 import datetime
@@ -22,10 +21,9 @@ from .log_utils import (
     JsonFormatter,
     build_print_function,
     print_message,
-    print_message_prefixed,
-    print_color_message_prefixed,
 )
 from .service_config import (
+    ServiceFiles,
     get_shared_logging_config,
     get_command,
     get_process_path,
@@ -63,7 +61,7 @@ class Compose:
         self,
         project_name: str,
         working_directory: pathlib.Path,
-        service_files: List[pathlib.Path],
+        service_files: ServiceFiles,
         verbose: bool = False,
         use_color: bool = True,
         defer_config_load: bool = False,
@@ -87,7 +85,7 @@ class Compose:
         self.use_colors: bool = use_color
         self.color_assigner: ColorAssigner = ColorAssigner()
 
-        self.service_files: List[pathlib.Path] = service_files
+        self.service_files: ServiceFiles = service_files
         self.service_config: Optional[dict] = None
 
         self.depending: Optional[Mapping[str, Iterable[str]]] = None
@@ -111,17 +109,18 @@ class Compose:
         if self.service_config is None:
             self.load_service_config(**load_options)
 
+    def get_services_configs(self) -> Dict[str, dict]:
+        self.assure_service_config()
+        assert self.service_config is not None
+        return self.service_config["services"] or {}
+
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
 
     def _parse_service_config(
         self, check_consistency=True, interpolate=True, normalize=True, resolve_paths=True
     ):
-        parsed_files = [
-            yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.service_files
-        ]
-
-        parsed_data = merge_configs(parsed_files)
+        parsed_data = merge_configs(self.service_files.get_parsed_files())
         # TODO validate format
 
         self.service_config = parsed_data
@@ -144,7 +143,8 @@ class Compose:
     def _update_dependencies(self):
         assert self.service_config is not None and "services" in self.service_config
 
-        services = self.service_config["services"]
+        services = self.get_services_configs()
+
         depending: Dict[str, List[str]] = {k: [] for k in services.keys()}
         depends: Dict[str, List[str]] = {k: [] for k in services.keys()}
 
@@ -576,7 +576,7 @@ class Compose:
                     "image": get_process_path(resolve_command(get_command(s, self.logger))),
                     "sequence": i,
                 }
-                for i, (name, s) in enumerate(self.service_config["services"].items())
+                for i, (name, s) in enumerate(self.get_services_configs().items())
             ]
             self.show_images(self.working_directory, self.project_name, services_info)
 
@@ -630,7 +630,7 @@ class Compose:
             assert self.service_config is not None
             services_info = [
                 {"name": name, "command": get_command(s, self.logger), "state": "-", "sequence": i}
-                for i, (name, s) in enumerate(self.service_config["services"].items())
+                for i, (name, s) in enumerate(self.get_services_configs().items())
             ]
             self.show_service_status(
                 self.working_directory, self.project_name, services_info, **kwargs
@@ -880,7 +880,7 @@ class Compose:
         return {
             "project_name": self.project_name,
             "working_directory": str(self.working_directory),
-            "service_files": [str(f) for f in self.service_files],
+            "service_files": [str(f) for f in self.service_files.paths],
             "create_time": self.create_time,
         }
 
@@ -1243,7 +1243,7 @@ class Compose:
 
         assert self.service_config is not None
 
-        if code_from is not None and code_from not in self.service_config["services"].keys():
+        if code_from is not None and code_from not in self.get_services_configs().keys():
             self.logger.error(f"{code_from} is not found among services")
             return -1
 
@@ -1268,7 +1268,7 @@ class Compose:
                     verbose=self.verbose,
                 )
                 for (index, (name, service_config)) in enumerate(
-                    self.service_config["services"].items()
+                    self.get_services_configs().items()
                 )
             }
 
@@ -1285,7 +1285,7 @@ class Compose:
             )
 
             if services is None:
-                input_services = list(self.service_config["services"].keys())
+                input_services = list(self.get_services_configs().keys())
                 start_services = input_services.copy()
             else:
                 input_services = services.copy()
@@ -1435,20 +1435,6 @@ async def get_services(session: aiohttp.ClientSession, project):
     response = await session.get(f"/{project}")
     data = await response.json()
     return data["services"]
-
-
-# https://gist.github.com/pypt/94d747fe5180851196eb
-class UniqueKeyLoader(yaml.SafeLoader):
-    def construct_mapping(self, node, deep=False):
-        mapping = set()
-        for key_node, value_node in node.value:
-            if ":merge" in key_node.tag:
-                continue
-            key = self.construct_object(key_node, deep=deep)
-            if key in mapping:
-                raise ValueError(f"Duplicate {key!r} key found in YAML.")
-            mapping.add(key)
-        return super().construct_mapping(node, deep)
 
 
 from aiohttp.web import (
