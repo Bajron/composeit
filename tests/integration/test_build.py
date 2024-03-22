@@ -46,11 +46,7 @@ def test_build_single(process_cleaner):
         log.log_on.acquire()
         subprocess.call(["composeit", "up", "leaf"], cwd=service_directory)
 
-        for _ in range(10):
-            states = ps(service_directory, services=["leaf"])
-            if states and states["leaf"] == "exited":
-                break
-            time.sleep(0.1)
+        ps_wait_for(service_directory, service="leaf", state="exited", sleep=0.1)
 
         log.stop()
         logs = log.get_service("leaf")
@@ -98,10 +94,8 @@ def test_build_on_up(process_cleaner):
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
-        for _ in range(20):
-            states = ps(service_directory, services=["leaf"])
-            if states and states["leaf"] == "exited":
-                break
+        ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
+        states = ps(service_directory, services=["leaf"])
         assert states["leaf"] == "exited"
         assert build_file.exists()
         assert root_build_file.exists()
@@ -141,10 +135,8 @@ def test_no_build_on_up(process_cleaner):
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
-        for _ in range(20):
-            states = ps(service_directory, services=["leaf"])
-            if states and states["leaf"] == "exited":
-                break
+        ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
+        states = ps(service_directory, services=["leaf"])
         assert states["leaf"] == "exited"
         assert not build_file.exists()
         assert not root_build_file.exists()
@@ -182,19 +174,15 @@ def test_clean_single(process_cleaner):
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
-        for _ in range(20):
-            states = ps(service_directory, services=["leaf"])
-            if states and states["leaf"] == "exited":
-                break
+
+        ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
+        states = ps(service_directory, services=["leaf"])
         assert states["leaf"] == "exited"
         assert build_file.exists()
         assert root_build_file.exists()
 
         subprocess.call(["composeit", "down", "root"], cwd=service_directory)
-        for _ in range(20):
-            states = ps(service_directory, services=["root"])
-            if states and states["root"] == "exited":
-                break
+        ps_wait_for(service_directory, service="root", state="exited", tries=20)
 
         assert not build_file.exists()
         assert not root_build_file.exists()
@@ -227,10 +215,8 @@ def test_build_env(process_cleaner):
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
-        for _ in range(20):
-            states = ps(service_directory, services=["env_build"])
-            if states and states["env_build"] == "exited":
-                break
+        ps_wait_for(service_directory, service="env_build", state="exited", tries=20)
+        states = ps(service_directory, services=["env_build"])
         assert states["env_build"] == "exited"
         assert build_file.exists()
 

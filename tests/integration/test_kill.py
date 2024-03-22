@@ -33,11 +33,10 @@ def test_kill(process_cleaner):
         down = subprocess.Popen(["composeit", "down"], cwd=service_directory)
         process_cleaner.append(down)
 
-        for _ in range(10):
-            p = ps(service_directory)
-            if p["simple_term"] == "terminated":
-                break
-            time.sleep(0.01)
+        ps_wait_for(
+            service_directory, service="simple_term", state="terminated", tries=20, sleep=0.02
+        )
+        p = ps(service_directory)
 
         assert p["simple_term"] == "terminated"
         assert p["long_wait"] == "terminating"

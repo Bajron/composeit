@@ -10,10 +10,12 @@ def test_up_simple_detached_down_on_side():
     try:
         subprocess.call(["composeit", "up", "-d"], cwd=service_directory)
 
-        for _ in range(10):
-            states = ps(service_directory)
-            if states is not None and any([state == "up" for state in states.values()]):
-                break
+        ps_wait(
+            service_directory,
+            tries=10,
+            until=lambda s: any([state == "up" for state in s.values()]),
+        )
+        states = ps(service_directory)
         assert any([state == "up" for state in states.values()])
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
@@ -27,10 +29,12 @@ def test_up_simple_detached_down_on_side_cwd():
     try:
         subprocess.call(["composeit", "-f", str(service_file), "up", "-d"])
 
-        for _ in range(10):
-            states = ps(service_directory)
-            if states is not None and any([state == "up" for state in states.values()]):
-                break
+        ps_wait(
+            service_directory,
+            tries=10,
+            until=lambda s: any([state == "up" for state in s.values()]),
+        )
+        states = ps(service_directory)
         assert any([state == "up" for state in states.values()])
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)

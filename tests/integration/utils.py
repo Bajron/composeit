@@ -107,6 +107,21 @@ def ps(service_directory, *args, services=None):
     return states
 
 
+def ps_wait(service_directory, *args, services=None, sleep=0, tries=5, until):
+    states = ps(service_directory, *args, services=services)
+    for _ in range(tries):
+        if states is not None and until(states):
+            break
+        time.sleep(sleep)
+        states = ps(service_directory, *args, services=services)
+
+
+def ps_wait_for(service_directory, *args, service, state, **kwargs):
+    return ps_wait(
+        service_directory, *args, services=[service], **kwargs, until=lambda x: x[service] == state
+    )
+
+
 def wait_for_ps(service_directory, *args, services=None, timeout=30):
     end_time = time.time() + timeout
     states = None

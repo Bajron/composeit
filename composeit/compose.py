@@ -15,7 +15,7 @@ from aiohttp import web, ClientConnectorError, ClientResponseError
 from json.decoder import JSONDecodeError
 from .service_config import get_signal, get_default_kill
 from .log_utils import ComposeFormatter, build_format
-from typing import List, Dict, Optional, Union, Iterable, Mapping
+from typing import List, Dict, Optional, Union, Iterable, Mapping, Set
 
 from .log_utils import (
     JsonFormatter,
@@ -117,11 +117,12 @@ class Compose:
         assert self.service_config is not None
         return self.service_config["services"] or {}
 
-    def get_defaults_services(self) -> Iterable[str]:
+    def get_defaults_services(self, with_profiles: Optional[List[str]] = None) -> Iterable[str]:
+        profiles = with_profiles if with_profiles is not None else self.profiles
         return [
             key
             for key, service in self.get_services_configs().items()
-            if "profile" not in service or service["profile"] in self.profiles
+            if "profile" not in service or service["profile"] in profiles
         ]
 
     def _get_next_color(self):
@@ -223,12 +224,9 @@ class Compose:
 
     def make_start_session(self, services=None, request_build=False, no_deps=False):
         async def run_client_commands(session: aiohttp.ClientSession):
-            response = await session.get(f"/")
-            data = await response.json()
-            project = data["project_name"]
-
-            response = await session.get(f"/{project}")
-            data = await response.json()
+            remote = ComposeProxy(session, self)
+            project = await remote.get_project()
+            data = await remote.get_project_data()
             existing_services = data["services"]
 
             if services is not None:
@@ -239,10 +237,7 @@ class Compose:
                         continue
                     to_request.append(service)
             else:
-                to_request = data["default_services"]
-                # TODO: this^^ is for no profile provided locally
-                #       with local --profile need to send to server and use matching list
-                # TODO: here and other places
+                to_request = await remote.get_default_services()
 
             bad_responses = 0
             for service in to_request:
@@ -831,15 +826,12 @@ class Compose:
 
     def make_wait_for_up_session(self, services: Optional[List[str]] = None):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/") as response:
-                compose_data = await response.json()
-                project = compose_data["project_name"]
+            remote = ComposeProxy(session, self)
+            project = await remote.get_project()
 
             nonlocal services
             if services is None:
-                async with session.get(f"/{project}") as response:
-                    project_data = await response.json()
-                    services = project_data["default_services"]
+                services = await remote.get_default_services()
 
             all_services_up = False
             while not all_services_up:
@@ -862,15 +854,12 @@ class Compose:
 
     def make_wait_session(self, services: Optional[List[str]] = None, down_project=False):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/") as response:
-                compose_data = await response.json()
-                project = compose_data["project_name"]
+            remote = ComposeProxy(session, self)
+            project = await remote.get_project()
 
             nonlocal services
             if services is None:
-                async with session.get(f"/{project}") as response:
-                    project_data = await response.json()
-                    services = project_data["default_services"]
+                services = await remote.get_default_services()
 
             any_service_down = False
             while not any_service_down:
@@ -900,10 +889,11 @@ class Compose:
     async def get_call(self, request):
         return web.json_response(self.get_call_json())
 
-    def get_project_json(self):
+    def get_project_json(self, profiles: List[str]):
         return {
             "services": list(self.services.keys()),
             "default_services": list(self.get_defaults_services()),
+            "profile_services": list(self.get_defaults_services(with_profiles=profiles)),
         }
 
     def _get_project(self, request: web.Request):
@@ -935,7 +925,8 @@ class Compose:
 
     async def get_project(self, request: web.Request):
         self._get_project(request)
-        return web.json_response(self.get_project_json())
+        profiles: List[str] = request.query.getall("profile", [])
+        return web.json_response(self.get_project_json(profiles=profiles))
 
     def get_service_json(self, service_name):
         s = self.services[service_name]
@@ -1117,8 +1108,10 @@ class Compose:
         body = await self._get_json_or_empty(request)
         services = body.get("services")
         if services is None:
-            # TODO: default_services + started
-            services = list(self.services.keys())
+            started: Set[str] = {
+                name for name, s in self.services.items() if not (s.stopped or s.terminated)
+            }
+            services = set(self.services.keys()).union(started)
 
         sequence = services if body.get("no_deps", False) else self.get_stop_sequence(services)
         timeout = body.get("timeout", None)
@@ -1452,6 +1445,43 @@ async def get_services(session: aiohttp.ClientSession, project):
     response = await session.get(f"/{project}")
     data = await response.json()
     return data["services"]
+
+
+class ComposeProxy:
+    def __init__(self, session: aiohttp.ClientSession, compose: Compose) -> None:
+        self.session = session
+        self.compose = compose
+
+        self.project = compose.project_name
+
+        self.directory_data: Optional[dict] = None
+        self.project_data: Optional[dict] = None
+
+    async def get_project(self):
+        async with self.session.get(f"/") as response:
+            self.directory_data = await response.json()
+
+        if self.directory_data is not None:
+            self.project = self.directory_data["project_name"]
+
+        return self.project
+
+    async def get_project_data(self, project=None):
+        if project is None:
+            project = self.project
+        if project is None:
+            project = await self.get_project()
+
+        async with self.session.get(
+            f"/{project}", params={"profile": self.compose.profiles}
+        ) as response:
+            self.project_data = await response.json()
+
+        return self.project_data
+
+    async def get_default_services(self):
+        data = await self.get_project_data()
+        return data["profile_services"] if self.compose.profiles else data["default_services"]
 
 
 from aiohttp.web import (

@@ -61,10 +61,7 @@ def test_merging_env_and_args(process_cleaner, f1, f2, print_sequence):
         log = LogsGatherer(service_directory, ["env"])
         subprocess.call(["composeit", *args, "start"], cwd=service_directory)
 
-        for _ in range(3):
-            states = ps(service_directory)
-            if states["env"] == "exited":
-                break
+        ps_wait_for(service_directory, service="env", state="exited")
 
         subprocess.call(["composeit", *args, "down"], cwd=service_directory)
         up.wait(5)

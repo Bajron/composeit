@@ -20,10 +20,8 @@ def test_restarting(process_cleaner):
         ShowLogs(up.stdout)
 
         # always policy brings the service up on each server start (note we started only "one_shot")
-        for _ in range(3):
-            states = ps(service_directory)
-            if states and states["always"] == "up":
-                break
+        ps_wait_for(service_directory, service="always", state="up")
+        states = ps(service_directory)
         assert states["always"] == "up"
 
         subprocess.call(["composeit", "stop", "always"], cwd=service_directory)
@@ -32,12 +30,7 @@ def test_restarting(process_cleaner):
         logs.log_on.acquire()
         subprocess.call(["composeit", "start"], cwd=service_directory)
 
-        for _ in range(20):
-            states = ps(service_directory, services=["fail_restart"])
-            if states and states["fail_restart"] == "exited":
-                break
-            time.sleep(0.3)
-
+        ps_wait_for(service_directory, service="fail_restart", state="exited", sleep=0.1, tries=20)
         states = ps(service_directory)
 
         assert states["always"] == "up"
