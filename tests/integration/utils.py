@@ -8,9 +8,15 @@ import re
 import os
 import threading
 import locale
-from typing import List
+from typing import List, Optional, Tuple, Union
 
 tests_directory = pathlib.Path(__file__).parent
+
+
+def wait_for_server_line(up: subprocess.Popen):
+    assert up.stdout is not None
+    first_line = up.stdout.readline().decode()
+    assert first_line.startswith("Server created")
 
 
 # composeit processes usually spawn additional python processes
@@ -63,7 +69,7 @@ def process_cleaner():
                 print("process_cleaner: Terminating", child)
                 child.terminate()
 
-        pytest.fail("Process alive on teardown", process.args)
+        pytest.fail(f"Process alive on teardown: {str(process.args)}")
 
 
 def ps_split_to_state(split):
@@ -165,7 +171,7 @@ class LogsGatherer:
             cwd=service_directory,
             env=env,
         )
-        self.log_out = None
+        self.log_out: Optional[Union[List[Tuple[str, str]], List[str]]] = None
         self.log_on = threading.Semaphore(0)
 
         if marker_filter and services is not None:
@@ -177,34 +183,40 @@ class LogsGatherer:
         self.reading_thread.start()
 
     def get_service_ints(self, service):
+        assert self.log_out is not None
         return list(map(lambda x: int(x[1]), filter(lambda x: x[0] == service, self.log_out)))
 
     def get_service(self, service):
+        assert self.log_out is not None
         return list(x[1] for x in filter(lambda x: x[0] == service, self.log_out))
 
     def read_filtered(self, services, marker_filter):
-        self.log_out = []
+        log_out: List[Tuple[str, str]] = []
+        self.log_out = log_out
+
         services = "|".join(services)
         marker_filter = f"[{marker_filter}]" if marker_filter else ""
         log_line = re.compile(f"^(?P<service>{services}){marker_filter}\\s+(?P<log>.*)$")
         encoding = locale.getpreferredencoding(False)
         self.log_on.release()
-        for l in [
-            l.decode(encoding, errors="replace").strip() for l in self.process.stdout.readlines()
-        ]:
+
+        lines = self.process.stdout.readlines() if self.process.stdout else []
+        for l in [l.decode(encoding, errors="replace").strip() for l in lines]:
             m = log_line.match(l)
             if not m:
                 continue
-            self.log_out.append((m["service"], m["log"].strip()))
+            log_out.append((m["service"], m["log"].strip()))
 
     def read_unfiltered(self):
-        self.log_out = []
+        log_out: List[str] = []
+        self.log_out = log_out
+
         encoding = locale.getpreferredencoding(False)
         self.log_on.release()
-        for l in [
-            l.decode(encoding, errors="replace").strip() for l in self.process.stdout.readlines()
-        ]:
-            self.log_out.append(l)
+
+        lines = self.process.stdout.readlines() if self.process.stdout else []
+        for l in [l.decode(encoding, errors="replace").strip() for l in lines]:
+            log_out.append(l)
 
     def stop(self):
         kill_deepest_child(self.process.pid)

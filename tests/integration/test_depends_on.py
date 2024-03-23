@@ -10,9 +10,7 @@ def test_dependencies(process_cleaner):
         up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
 
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         states = ps(service_directory)
         assert all(map(lambda x: x == "up", states.values()))
@@ -62,9 +60,7 @@ def test_restarting_dependencies(process_cleaner):
         up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
 
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         # Just close independent service
         subprocess.run(["composeit", "stop", "leaf"], cwd=service_directory)

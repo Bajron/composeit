@@ -15,9 +15,7 @@ def test_environment_expansions(process_cleaner):
             stdout=subprocess.PIPE,
         )
 
-        process_cleaner.append(up)
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         logs = LogsGatherer(
             service_directory, ["env_test_map", "env_test_list", "env_test_suppress"]

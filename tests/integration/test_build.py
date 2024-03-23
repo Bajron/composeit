@@ -8,7 +8,7 @@ def test_build_single(process_cleaner):
     build_file = service_directory / "message_leaf.tmp"
     root_build_file = service_directory / "message_root.tmp"
     try:
-        up: subprocess.Popen = None
+        up: Optional[subprocess.Popen] = None
         assert not build_file.exists()
         assert not root_build_file.exists()
 
@@ -16,9 +16,7 @@ def test_build_single(process_cleaner):
             ["composeit", "start", "--no-start"], cwd=service_directory, stdout=subprocess.PIPE
         )
         process_cleaner.append(up)
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
         ShowLogs(up.stdout)
 
         states = ps(service_directory)
@@ -84,15 +82,13 @@ def test_build_on_up(process_cleaner):
     root_build_file = service_directory / "message_root.tmp"
 
     try:
-        up: subprocess.Popen = None
+        up: Optional[subprocess.Popen] = None
         assert not build_file.exists()
         assert not root_build_file.exists()
 
         up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
@@ -123,7 +119,7 @@ def test_no_build_on_up(process_cleaner):
     root_build_file = service_directory / "message_root.tmp"
 
     try:
-        up: subprocess.Popen = None
+        up: Optional[subprocess.Popen] = None
         assert not build_file.exists()
         assert not root_build_file.exists()
 
@@ -131,9 +127,7 @@ def test_no_build_on_up(process_cleaner):
             ["composeit", "up", "--no-build"], cwd=service_directory, stdout=subprocess.PIPE
         )
         process_cleaner.append(up)
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
@@ -164,15 +158,13 @@ def test_clean_single(process_cleaner):
     root_build_file = service_directory / "message_root.tmp"
 
     try:
-        up: subprocess.Popen = None
+        up: Optional[subprocess.Popen] = None
         assert not build_file.exists()
         assert not root_build_file.exists()
 
         up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
@@ -201,7 +193,7 @@ def test_build_env(process_cleaner):
     build_file = service_directory / "env_build.tmp"
 
     try:
-        up: subprocess.Popen = None
+        up: Optional[subprocess.Popen] = None
         assert not build_file.exists()
 
         up = subprocess.Popen(
@@ -210,9 +202,7 @@ def test_build_env(process_cleaner):
             stdout=subprocess.PIPE,
         )
         process_cleaner.append(up)
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         ps_wait_for(service_directory, service="env_build", state="exited", tries=20)
         states = ps(service_directory, services=["env_build"])

@@ -12,9 +12,7 @@ def test_attach(process_cleaner):
             ["composeit", "up", "--no-start"], cwd=service_directory, stdout=subprocess.PIPE
         )
         process_cleaner.append(up)
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         log = LogsGatherer(service_directory, ["echo"], marker_filter="")
         process_cleaner.append(log.process)
@@ -32,6 +30,8 @@ def test_attach(process_cleaner):
             env=env,
         )
         process_cleaner.append(attach)
+        assert attach.stdin is not None
+        assert attach.stdout is not None
 
         words = ["spam", "ham", "eggs"]
         log.log_on.acquire()
@@ -42,6 +42,7 @@ def test_attach(process_cleaner):
         kill_deepest_child(attach.pid)
 
         log.stop()
+        assert log.log_out is not None
         assert log.log_out[-3:] == words
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)

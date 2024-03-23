@@ -5,17 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "composeit"
 version = "0.0.1"
-authors = [
-    {name = "Błażej Kramarski", email = "b.kramarski@gmail.com"},
-]
+authors = [{ name = "Błażej Kramarski", email = "b.kramarski@gmail.com" }]
 description = "Process composer mimicking docker-compose"
 readme = "README.md"
 requires-python = ">=3.8"
 keywords = ["compose", "process"]
-license = {text = "MIT"}
-classifiers = [
-    "Programming Language :: Python :: 3",
-]
+license = { text = "MIT" }
+classifiers = ["Programming Language :: Python :: 3"]
 dependencies = [
     "pyyaml",
     "termcolor",
@@ -25,13 +21,7 @@ dependencies = [
     "python-dotenv @ git+https://github.com/Bajron/python-dotenv.git@v1.1.0",
 ]
 [project.optional-dependencies]
-dev = [
-    "black",
-    "pytest",
-    "mypy",
-    "types-PyYAML",
-    "types-psutil",
-]
+dev = ["black", "pytest", "pytest-cov", "mypy", "types-PyYAML", "types-psutil"]
 #dynamic = ["version"]
 
 [project.scripts]
@@ -39,3 +29,19 @@ composeit = "composeit.main:main"
 
 [tool.black]
 line-length = 100
+
+[tool.mypy]
+check_untyped_defs = true
+ignore_missing_imports = true # TODO: Improve on this some day
+
+[tool.pytest.ini_options]
+addopts = "--cov=composeit --cov-report html --cov-report term"
+
+[tool.coverage.paths]
+source = ["../composeit", "*/site-packages/composeit"]
+
+[tool.coverage.run]
+source = ["composeit", "."]
+
+[tool.coverage.report]
+show_missing = true

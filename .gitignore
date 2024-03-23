@@ -5,6 +5,10 @@ venv
 env
 .venv
 .env
+.tox
 
 *.log
 *.log.*
+
+htmlcov
+.coverage*

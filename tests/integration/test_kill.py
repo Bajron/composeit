@@ -18,9 +18,7 @@ def test_kill(process_cleaner):
             cwd=service_directory,
             stdout=subprocess.PIPE,
         )
-        process_cleaner.append(up)
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         log = LogsGatherer(
             service_directory,

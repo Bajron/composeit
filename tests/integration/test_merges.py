@@ -12,9 +12,7 @@ def test_merging_separate_services(process_cleaner):
         up = subprocess.Popen(
             ["composeit", *args, "up"], cwd=service_directory, stdout=subprocess.PIPE
         )
-        process_cleaner.append(up)
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         # NOTE: no config files passed to ps
         states = ps(service_directory)

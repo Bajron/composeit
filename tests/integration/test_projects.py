@@ -12,9 +12,7 @@ def test_up_simple_down_on_side(process_cleaner):
     up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
     process_cleaner.append(up)
 
-    # Note: need to wait for it to start the server
-    first_line = up.stdout.readline().decode()
-    assert first_line.startswith("Server created")
+    wait_for_server_line(up)
 
     subprocess.call(["composeit", "down"], cwd=service_directory)
 
@@ -60,9 +58,7 @@ def test_diagnostic_on_side(process_cleaner):
         up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
 
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         header_lines = 2
         services = 2
@@ -136,9 +132,7 @@ def test_logs_on_side(process_cleaner):
         up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
 
-        # Note: need to wait for it to start the server
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
@@ -179,6 +173,7 @@ def test_logs_on_side(process_cleaner):
         )
         process_cleaner.append(attach_for_log)
 
+        assert log_all.stdout is not None
         out = [log_all.stdout.readline().decode() for _ in range(6)]
         kill_deepest_child(log_all.pid)
         s1 = [int(s.replace("simple1:", "").strip()) for s in out if "simple1" in s]
@@ -189,16 +184,19 @@ def test_logs_on_side(process_cleaner):
 
         # Single log and attachment provides raw input
 
+        assert log_1.stdout is not None
         out = [log_1.stdout.readline().decode() for _ in range(6)]
         kill_deepest_child(log_1.pid)
         s1 = [int(s.strip()) for s in out]
         assert is_sequence(s1)
 
+        assert log_2.stdout is not None
         out = [log_2.stdout.readline().decode() for _ in range(6)]
         kill_deepest_child(log_2.pid)
         s2 = [int(s.strip()) for s in out]
         assert is_sequence(s2)
 
+        assert attach_for_log.stdout is not None
         out = [attach_for_log.stdout.readline().decode() for _ in range(6)]
         kill_deepest_child(attach_for_log.pid)
         s2 = [int(s.strip()) for s in out]
@@ -221,9 +219,7 @@ def test_start_by_pointed_file(process_cleaner):
 
         # Note no CWD set in here
         up = subprocess.Popen(["composeit", "-f", str(service_file), "up"], stdout=subprocess.PIPE)
-        process_cleaner.append(up)
-        first_line = up.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_server_line(up)
 
         services = ps(tests_directory)
         assert services is None
@@ -278,9 +274,11 @@ def test_start_by_file_with_name(process_cleaner):
         )
         process_cleaner.append(up2)
 
+        assert up1.stdout is not None
         first_line = up1.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
+        assert up2.stdout is not None
         first_line = up2.stdout.readline().decode()
         assert first_line.startswith("Server created")
 

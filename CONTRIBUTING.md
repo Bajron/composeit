@@ -42,6 +42,15 @@ composeit --help
 
 ## Testing
 
+Check formatting
+```
+black --check composeit tests
+```
+or just format it
+```
+black composeit tests
+```
+
 Run tests
 ```
 pytest
