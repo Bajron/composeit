@@ -74,9 +74,9 @@ def test_restarting_dependencies(process_cleaner):
 
         # Restart crucial service, not deps, so depending service is not started
         subprocess.run(
-            ["composeit", "restart", "root", "--no-deps", "--timeout", "2"], cwd=service_directory
+            ["composeit", "restart", "root", "--no-deps", "--timeout", "5"], cwd=service_directory
         )
-        time.sleep(0.3) # TODO: race with up -> stopping -> up
+        time.sleep(0.3)  # TODO: race with up -> stopping -> up
         ps_wait_for(service_directory, service="root", state="up")
         states = ps(service_directory)
         assert states["leaf"] == "exited"
