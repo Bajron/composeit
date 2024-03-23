@@ -1204,7 +1204,7 @@ class Compose:
             ]
         )
 
-        asyncio.get_event_loop().create_task(
+        return asyncio.get_event_loop().create_task(
             run_server(self.app, self.logger.getChild("http"), self.communication_pipe)
         )
 
@@ -1282,8 +1282,9 @@ class Compose:
                 )
             }
 
+            server_task: Optional[asyncio.Task] = None
             if start_server:
-                self.start_server()
+                server_task = self.start_server()
 
             service_log_handler = logging.StreamHandler(stream=sys.stderr)
             service_log_handler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
@@ -1505,7 +1506,7 @@ async def run_server(app: Application, logger: logging.Logger, path: str, delete
 
         runner = AppRunner(
             app,
-            handle_signals=True,
+            handle_signals=False,
             access_log_class=AccessLogger,
             access_log_format=AccessLogger.LOG_FORMAT,
             access_log=logger,
