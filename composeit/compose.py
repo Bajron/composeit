@@ -804,7 +804,7 @@ class Compose:
                 row["tty"] = p["terminal"]
                 row["time"] = cumulative_time_text(p["cpu_times"]["user"])
                 row["cmd"] = " ".join(p["cmdline"])
-                return row
+                return {k: v or "-" for k, v in row.items()}
 
             info_rows = []
             for process_info in processes:
