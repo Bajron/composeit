@@ -8,6 +8,8 @@ env
 .tox
 .*cache
 
+.vscode
+
 *.log
 *.log.*
 

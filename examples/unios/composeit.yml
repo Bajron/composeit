@@ -1,4 +1,8 @@
 services:
+  show_env:
+    command: echo "KEEP_OPT=${KEEP_OPT} COUNT_OPT=${COUNT_OPT} MAX_REPEAT=${MAX_REPEAT}"
+    shell: true
+
   ping_service1:
     command: ping
     args:

@@ -24,9 +24,15 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
     counter = options.start
+    sleep = options.time
     while run:
         print(counter, flush=True)
-        time.sleep(options.time)
+        if sleep > 0.1:
+            end = time.time() + sleep
+            while time.time() < end:
+                time.sleep(min(end - time.time(), 0.1))
+        else:
+            time.sleep(options.time)
         counter += options.delta
         if options.exit is not None and counter > options.exit:
             run = False
