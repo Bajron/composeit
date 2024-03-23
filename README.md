@@ -41,7 +41,7 @@ or
 
 ```
 pip install -e .
-cd test/unios
+cd examples/unios
 composeit -up # ctrl+c to stop
 ```
 

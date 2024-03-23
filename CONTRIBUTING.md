@@ -60,7 +60,7 @@ mypy --check-untyped-defs composeit
 ## Manual test
 
 ```
-cd test/unios
+cd examples/unios
 ```
 
 ```
