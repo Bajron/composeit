@@ -57,7 +57,10 @@ def test_restarting_dependencies(process_cleaner):
     service_directory = tests_directory / "projects" / "depends_on"
 
     try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        # FIXME: verbose for debugging on github
+        up = subprocess.Popen(
+            ["composeit", "--verbose", "up"], cwd=service_directory, stdout=subprocess.PIPE
+        )
         process_cleaner.append(up)
 
         wait_for_server_line(up)
@@ -74,9 +77,8 @@ def test_restarting_dependencies(process_cleaner):
 
         # Restart crucial service, not deps, so depending service is not started
         subprocess.run(
-            ["composeit", "restart", "root", "--no-deps", "--timeout", "5"], cwd=service_directory
+            ["composeit", "restart", "root", "--no-deps", "--timeout", "3"], cwd=service_directory
         )
-        time.sleep(0.3)  # TODO: race with up -> stopping -> up
         ps_wait_for(service_directory, service="root", state="up")
         states = ps(service_directory)
         assert states["leaf"] == "exited"

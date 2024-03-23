@@ -408,7 +408,7 @@ class AsyncProcess:
             if not restarted:
                 continue
 
-            await self.started()
+            await self._wait_for_started()
             success_after = duration_to_seconds(self.restart_policy_config["window"])
             if success_after <= 0:
                 return True
@@ -449,7 +449,7 @@ class AsyncProcess:
                 process_started = False
                 if self.execute:
                     await self._start_process()
-                    await self.started()
+                    await self._wait_for_started()
                     process_started = True
 
                 while process_started:
@@ -576,24 +576,16 @@ class AsyncProcess:
             self.log.warning("Does not seem to be stopped")
             return False
 
-    async def _start_process(self):
-        self.rc = None
-        self.process = None
-        self.command_executed = None
-        self.start_time = None
-        self.stop_time = None
-        self.process_initialization = self._make_process()
-
-    def _cancel_sleep(self):
-        if self.sleep_task is not None:
-            self.sleep_task.cancel()
-
     async def _sleep(self, seconds):
         try:
             self.sleep_task = asyncio.create_task(asyncio.sleep(seconds))
             await self.sleep_task
         except asyncio.exceptions.CancelledError:
             pass
+
+    def _cancel_sleep(self):
+        if self.sleep_task is not None:
+            self.sleep_task.cancel()
 
     async def _restart_process(self):
         sleep_time = self.restart_policy_config["delay"]
@@ -608,16 +600,24 @@ class AsyncProcess:
         await self._start_process()
         return True
 
+    async def _start_process(self):
+        self.rc = None
+        self.process = None
+        self.command_executed = None
+        self.start_time = None
+        self.stop_time = None
+        self.process_initialization = self._make_process()
+
+    async def _wait_for_started(self):
+        assert self.process_initialization is not None
+        self.process = await self.process_initialization
+        self._make_watch_coro()
+
     def _make_watch_coro(self):
         assert self.process is not None
         self.watch_coro = asyncio.gather(
             self.wait_for_code(), self.watch_stderr(self.process), self.watch_stdout(self.process)
         )
-
-    async def started(self):
-        assert self.process_initialization is not None
-        self.process = await self.process_initialization
-        self._make_watch_coro()
 
     async def stop(self, request_clean: Optional[bool] = None):
         if request_clean is not None:

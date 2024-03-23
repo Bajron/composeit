@@ -1136,6 +1136,7 @@ class Compose:
             try:
                 await asyncio.wait_for(self.services[s].stop(), timeout)
             except asyncio.TimeoutError:
+                self.logger.warning(f"Timeout when stopping {s}")
                 await self.services[s].stop()
 
         for s in reversed(sequence):
