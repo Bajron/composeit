@@ -1,61 +1,48 @@
 # composeit
 
 ## Notice
-This package is still during prototyping / intensive development
 
-## Installation
+This package is still during prototyping / intensive development.
 
-As usual with a Python package.
+Currently it is as a toy project, not a production ready solution.
 
-Prepare the virtual environemnt.
+It might be just good enough for your use case.
+See the similar tools section below if you are looking for a mature solution.
+
+## Purpose
+
+Have `docker-compose` without dockers.
+
+Sure, just running processes is not the same as running dockers,
+but the interface of `docker-compose` seems quite ok for organizing processes.
+
+The target is to have an intuitive interface based on the tool from the dockers' world.
+Surely not all concepts will translate well to just processes
+but we still get the advantage of readability and familiarity.
+
+Some of the features also will not work because we do not have the docker daemon.
+This is ok. Let's see what we can get.
+
+## Quickstart
+
 ```
+git clone https://github.com/Bajron/composeit
+cd composeit
 python -m venv venv
 ```
 
-Activate the environment in `cmd`
-```
-.\venv\Scripts\activate.bat
-```
-or in `bash`
 ```
 source ./venv/bin/activate
 ```
-
-Install the package in editable mode. Use development variant to run tests etc.
-```
-pip install -e .[dev]
-```
-
-See what is possible for now
-```
-composeit --help
-```
-
-Run tests
-```
-pytest
-```
-
-Skip integration tests
-```
-pytest --ignore=tests/integration
-```
-
-## Manual test
-
-In one window
-```
-composeit -f test/win/composeit.yml
-```
 or
 ```
-composeit -f test/linux/composeit.yml
+.\venv\Scripts\activate.bat
 ```
 
-
-In the other one
 ```
-composeit -f ./test/win/composeit.yml --test-server
+pip install -e .
+cd test/unios
+composeit -up # ctrl+c to stop
 ```
 
 ## Why?
@@ -80,110 +67,29 @@ The PyPy page suggests some specific use case, so I did not try it really.
 It does seem similar to `docker-compose` yaml.
 This could be what I wanted, but...
 
-I figured I can write it myself, have some fun
-and learn a little bit of asyncio by the way.
+I figured I can write it myself, have some fun and learn a little bit of asyncio by the way.
 
-## Purpose
-
-Have `docker-compose` without dockers.
-
-Sure, just running processes is not the same as running dockers,
-but the interface of docker-compose seems quite ok for organizing processes.
-
-I strive for intuitive interface using familiarity with
-the tool from the dockers' world.
-Surely not all concepts will translate well to just processes
-but we still get the advantage of readability and familiarity.
-
-Some of the features also will not work because we do not have the docker daemon,
-but this is ok. Let's see what we can get.
 
 ## TODO
-docker-compose
-- env_file
-- handling .env file for compose environment
-- entrypoint vs command/args
-- up, down, build commands
-- other commands
-- depends_on behavior
-- variable substitution (${:-})
-- labels
-- healthcheck
-- logging
-- stop_grace_period
-- stop_signal
-- ulimits, maybe on Linux?
-- restart policy - delay, max attempts, window
-- extensions fields? is it just working by default(yaml anchors)
-- scaling? could be done.. but
-- cap add/drop, could be done on Linux I guess, but would require root
-- build as dependecy/prepare operation
-  (new configuration fields, as dockerfile or context might not have sense)
-- new config loading into running daemon
+Checkout `poetry` and `pipx`
 
-options:
-- project-name
-- project directory
-- env-file
-- no colors
-- ansi (never, always, auto)
-- log level
-- verbose
+## Thanks
 
-commands that make sense:
-- build
-- config
-- up/run/start
-- down/kill/stop
-- restart
-- top/ps
-- version
-- logs
-- scale
+`python-dotenv` was a great example of setting up a Python project for me.
+Loading environemnt and variable expansion uses its implementation.
 
-python:
- - variants of package - with different features if avialable.
-   colors or command server is not required to run processes - optional dependencies
+I did not have patience to wait for my proposals there.
+This package uses my fork of the package.
+https://github.com/Bajron/python-dotenv/tree/v1.1.0
 
-## Ideas of `docker-compose` -> `compose-it` feature translation
-
-- `build` - Could be preparing the process.
-    For example several commands to produce a binary.
-    Perhaps should be just a single command? (we still have scripting)
-    Having a `clean` would be nice as well
-```
-  foo:
-    build:
-      shell_sequence: # good to introduce to change the method later
-        #- git clone ...?
-        - mkdir "${DST}"
-        - cmake -S "${SRC}" -B "${DST}" -D "CMAKE_BUILD_TYPE=${TYPE}"
-        - cmake --build "${DST}" --config "${TYPE}" "${@}"
-    clean:
-      shell_sequence:
-        - rm "${DST}" -rf
-
-  bar:
-    build:
-      shell_sequence:
-        - pip install xx  # this is interesting, which pip?
-    clean:
-      shell_sequence:
-        - pip uninstall xx
-
-  baz:
-    build:
-      shell_sequence:
-        - cd xx && cargo build
-```
-
-- OS dependant behavior?
-
-- Checkout `poetry` and `pipx`
+For this reason separate virtual environment or `pipx` is recommended to avoid a versioning clash.
 
 ## Similar tools
 
 It seems creating own compose-like tool is not that uncommon :)
 
+Checkout these projects too:
 * https://github.com/F1bonacc1/process-compose
 
+You might be interested in these as well:
+* https://docs.docker.com/compose/

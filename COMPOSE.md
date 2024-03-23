@@ -5,6 +5,9 @@ This file tracks features mimicked from the [docker-compose](https://docs.docker
 Commandline and schema lists are prefixed with a checkbox that serves as a TODO tracking.
 This way features that potentially make sense are signalled and tracked.
 
+If you see `~` in the checkbox, it means the feature is kind of implemented.
+Probably lacks some tests, or specification on how it is supposed to work.
+
 ## Basic functionality
 
 Commandline arguments
@@ -13,7 +16,7 @@ Commandline arguments
 * `[x]` `--env-file`
 * `[x]` `-f`, `--file`
 * `[ ]` `--parallel`
-* `[ ]` `--profile` (start services with matching `profiles`)
+* `[~]` `--profile` (start services with matching `profiles`)
 * `[ ]` `--progress`
 * `[x]` `--project-directory`
 * `[x]` `-p`, `--project-name`
@@ -26,10 +29,10 @@ Environment variables
 * `[x]` `COMPOSEIT_PROJECT_NAME`
 
 Service keys:
-* `[ ]` `profile`
+* `[x]` `profile`
 
 Top level keys:
-* `[ ]` `name`: sets project name
+* `[x]` `name`: sets project name
 
 ## build
 
@@ -42,14 +45,42 @@ Service keys:
 * `[x]` `build`
 
 Building process executes commands defined in the `build` key for a service.
-Currently `build` key can have `shell_sequence` which is a list of shell commands to execute and general environment definition (`environment`, `env_file`, `inherit_env`).
-If a shell command is provided as a list, it is regular process call.
+Currently `build` key can have `shell_sequence` which is a list of shell commands to execute,
+and general environment definition (`environment`, `env_file`, `inherit_env`).
+If a shell command is provided as a list, it is a regular process call.
 
 Note that dependencies of the executable file itself cannot be handled.
 The assumption is the executed shell commands delegate to a build system
 that can handle dependencies and incremental builds.
 
 If the service to build depends on a different service, the dependency is built first.
+
+### Example
+
+```
+  foo:
+    build:
+      shell_sequence:
+        - mkdir "${DST}"
+        - cmake -S "${SRC}" -B "${DST}" -D "CMAKE_BUILD_TYPE=${TYPE}"
+        - cmake --build "${DST}" --config "${TYPE}" "${@}"
+    clean:
+      shell_sequence:
+        - rm "${DST}" -rf
+
+  bar:
+    build:
+      shell_sequence:
+        - [pip, install, xx]
+    clean:
+      shell_sequence:
+        - [pip, uninstall, xx]
+
+  baz:
+    build:
+      shell_sequence:
+        - cd xx && cargo build
+```
 
 ## config
 
@@ -290,3 +321,20 @@ Commandline arguments:
 
 Not implemented. Could be feasible...
 Would require more explicit dependencies than the current approach to build.
+
+## Other features / TODOs
+
+composeit
+* `[~]` variable substitution
+* `[ ]` labels
+* `[ ]` healthcheks
+* `[ ]` scaling
+* `[ ]` ulimit, maybe on Linux
+* `[ ]` cap add/drop, could be done on Linux I guess, but would require root
+* `[ ]` new config loading into running daemon
+* `[ ]` different build approach
+
+python packaging
+* `[ ]` variants of package - with different features if available.
+   colors or command server is not required to run processes
+* `[ ]` OS dependant behavior? "signals" on Windows...

@@ -1,0 +1,29 @@
+services:
+  ping_service1:
+    command: ping
+    args:
+      - "${KEEP_OPT}"
+      - "127.0.0.1"
+
+  ping_service2:
+    inherit_environment: false
+    command: [ping, "${KEEP_OPT}", 127.0.0.2]
+
+  ping_service3:
+    command: ping ${COUNT_OPT} 4 127.0.0.3
+    shell: true
+    restart: on-failure
+    depends_on: ping_service2
+
+  ping_service4:
+    command: ping ${COUNT_OPT} ${MAX_REPEAT:-10} 127.0.0.4
+    shell: true
+    restart: always
+    depends_on:
+      - ping_service3
+
+  ping_no_log:
+    inherit_environment: false
+    command: [ping, "${KEEP_OPT}", 127.0.0.5]
+    logging:
+      driver: none
