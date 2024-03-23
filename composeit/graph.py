@@ -11,7 +11,9 @@ def topological_sequence(nodes: Iterable[str], neighbors: Mapping[str, Iterable[
     return sequence
 
 
-def topological_sort(node: str, neighbors: Mapping[str, Iterable[str]], visited: set, resolving: set):
+def topological_sort(
+    node: str, neighbors: Mapping[str, Iterable[str]], visited: set, resolving: set
+):
     if node in resolving:
         raise Exception(f"Cyclic dependency ({node})")
     resolving.add(node)

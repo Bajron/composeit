@@ -174,7 +174,6 @@ def test_clean_single(process_cleaner):
         first_line = up.stdout.readline().decode()
         assert first_line.startswith("Server created")
 
-
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
         assert states["leaf"] == "exited"

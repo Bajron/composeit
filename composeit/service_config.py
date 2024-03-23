@@ -33,9 +33,7 @@ class ServiceFiles:
             self._load_files()
 
     def _load_files(self):
-        self.loaded_files = [
-            yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.paths
-        ]
+        self.loaded_files = [yaml.load(file.open(), Loader=UniqueKeyLoader) for file in self.paths]
 
 
 # https://gist.github.com/pypt/94d747fe5180851196eb
@@ -123,11 +121,13 @@ def get_command(
 
 
 @overload
-def resolve_command(command: str) -> str: ...
+def resolve_command(command: str) -> str:
+    ...
 
 
 @overload
-def resolve_command(command: List[str]) -> List[str]: ...
+def resolve_command(command: List[str]) -> List[str]:
+    ...
 
 
 def resolve_command(command: Union[str, List[str]]):
