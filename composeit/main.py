@@ -503,7 +503,7 @@ def main():
                         filtered_argv = filtered_argv[:wt] + filtered_argv[wt + 2 :]
 
                     popen_kw: Dict[str, Any] = {}
-                    if os.name == "nt":
+                    if sys.platform == "win32":
                         # subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
                         # FIXME: closing parent still takes the process down...
                         popen_kw.update(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)

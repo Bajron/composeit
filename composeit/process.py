@@ -3,6 +3,7 @@ import logging.config
 import asyncio
 import psutil
 import os
+import sys
 import locale
 import datetime
 import subprocess
@@ -321,7 +322,7 @@ class AsyncProcess:
         # TODO: Process started with shell kills cmd, but child persists...
 
         # NOTE: This is here to prevent sending CTRL_C_EVENT to children
-        if os.name == "nt":
+        if sys.platform == "win32":
             popen_kw.update(creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         # else: # TODO: not sure yet if required on Linux, could be helpful for closing children
         #     popen_kw.update(start_new_session=True)

@@ -1,6 +1,6 @@
 from composeit.service_config import get_stop_signal, get_signal
 import signal
-import os
+import sys
 
 import pytest
 
@@ -18,7 +18,7 @@ def test_get_stop_signal():
 
 
 def test_get_signal():
-    if os.name == "nt":
+    if sys.platform == "win32":
         assert get_signal("CTRL_C_EVENT") == signal.CTRL_C_EVENT
         assert get_signal(get_signal("CTRL_C_EVENT")) == signal.CTRL_C_EVENT
 
