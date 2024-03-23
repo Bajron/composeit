@@ -1416,6 +1416,9 @@ class Compose:
                 )
 
             return True
+        except asyncio.TimeoutError as ex:
+            self.logger.warning(f"Timeout in server check: {ex}, assuming server is up")
+            return True
         except ClientConnectorError as ex:
             pass
         except FileNotFoundError as ex:

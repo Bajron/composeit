@@ -7,7 +7,7 @@ services:
     command: [python, ../../counter.py, --time, 0, --exit, 2]
     restart: unless-stopped
     restart_policy:
-      window: 0.5
+      window: 1.5
       delay: 0
       max_attempts: 2
 

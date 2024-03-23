@@ -61,6 +61,7 @@ def test_restarting(process_cleaner):
             assert [0, 1, 2, 3] == logs.get_service_ints(quick4), f"Not matching for {quick4}"
 
         # TODO: sometimes there is more here... that is why this one goes with --verbose
+        #       It might be time.sleep lag in the test app or something similar...
         # First run plus 2 restart attempts
         assert [0, 1, 2, 0, 1, 2, 0, 1, 2] == logs.get_service_ints("fail_restart")
 

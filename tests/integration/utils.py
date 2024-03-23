@@ -41,7 +41,9 @@ def is_sequence(s: List[int]):
 @pytest.fixture()
 def process_cleaner():
     to_clean: List[subprocess.Popen] = []
+
     yield to_clean
+
     for process in to_clean:
         try:
             children = psutil.Process(process.pid).children(recursive=True)
@@ -53,7 +55,10 @@ def process_cleaner():
         # Failing the test would be good...
 
         print("process_cleaner: Terminating", process)
-        process.terminate()
+        try:
+            process.terminate()
+        except psutil.NoSuchProcess:
+            pass
 
         for _ in range(10):
             running = 0
@@ -67,7 +72,10 @@ def process_cleaner():
         for child in children:
             if child.is_running():
                 print("process_cleaner: Terminating", child)
-                child.terminate()
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
 
         pytest.fail(f"Process alive on teardown: {str(process.args)}")
 

@@ -314,7 +314,8 @@ def test_start_by_file_with_name(process_cleaner):
 
         # Closing a service in project "1" leaves "2" unaffected
         subprocess.call(
-            ["composeit", "--project-name", "1", "down", "simple1"], cwd=service_directory
+            ["composeit", "--project-name", "1", "down", "-t", "4", "simple1"],
+            cwd=service_directory,
         )
 
         services = ps(tests_directory, "-f", str(service_file), "--project-name", "1")
@@ -328,7 +329,9 @@ def test_start_by_file_with_name(process_cleaner):
         assert services["simple2"] == "up"
 
         # Close project 1, the other one should be unaffected
-        subprocess.call(["composeit", "--project-name", "1", "down"], cwd=service_directory)
+        subprocess.call(
+            ["composeit", "--project-name", "1", "down", "-t", "4"], cwd=service_directory
+        )
 
         services = ps(service_directory, "--project-name", "1")
         assert services is None
@@ -352,8 +355,12 @@ def test_start_by_file_with_name(process_cleaner):
         assert services["simple2"] == "up"
 
     finally:
-        subprocess.call(["composeit", "--project-name", "1", "down"], cwd=service_directory)
-        subprocess.call(["composeit", "--project-name", "2", "down"], cwd=service_directory)
+        subprocess.call(
+            ["composeit", "--project-name", "1", "down", "-t", "4"], cwd=service_directory
+        )
+        subprocess.call(
+            ["composeit", "--project-name", "2", "down", "-t", "4"], cwd=service_directory
+        )
         rc = up1.wait(5)
         assert rc is not None
         rc = up2.wait(5)
