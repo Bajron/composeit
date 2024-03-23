@@ -121,13 +121,11 @@ def get_command(
 
 
 @overload
-def resolve_command(command: str) -> str:
-    ...
+def resolve_command(command: str) -> str: ...
 
 
 @overload
-def resolve_command(command: List[str]) -> List[str]:
-    ...
+def resolve_command(command: List[str]) -> List[str]: ...
 
 
 def resolve_command(command: Union[str, List[str]]):
