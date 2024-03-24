@@ -26,7 +26,7 @@ but we still get the advantage of readability and familiarity.
 Some of the features also will not work because we do not have the docker daemon.
 This is ok. Let's see what we can get.
 
-## Quickstart
+## Quick start
 
 ```
 git clone https://github.com/Bajron/composeit
@@ -64,19 +64,19 @@ composeit <command> --help
 
 ## Ad hoc process server
 
-To achieve certain features with the docker daemon missing
+To achieve certain features with the docker daemon missing,
 an ad hoc HTTP server is created that listens on a named pipe.
 
 The pipe is created in the project directory on Linux.
-On Windows a certain pipe is created in `.\\pipe\\`.
+On Windows the pipe is created in `.\\pipe\\`.
 Default access rights are applied.
 
 ## Known issues
 
 ### Windows
 
-* Process handling on Windows is very different from Linux (e.g. signal suporrt).
-There is no real graceful shutdown for the spawned processes.
+* Process handling on Windows is very different from Linux (e.g. signal support).
+There is no real graceful shutdown for processes at the moment.
 
 * Note that on Windows environment variable names in Python are
 [always uppercase](https://docs.python.org/3/library/os.html#os.environ)!

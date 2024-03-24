@@ -1,8 +1,9 @@
 # Translation from docker-compose features
 
-This file tracks features mimicked from the [docker-compose](https://docs.docker.com/engine/reference/commandline/docker/).
+This file tracks features mimicked from the
+[docker-compose](https://docs.docker.com/engine/reference/Command line/docker/).
 
-Commandline and schema lists are prefixed with a checkbox that serves as a TODO tracking.
+Command line and schema lists are prefixed with a checkbox that serves as a TODO tracking.
 This way features that potentially make sense are signalled and tracked.
 
 If you see `~` in the checkbox, it means the feature is kind of implemented.
@@ -10,7 +11,7 @@ Probably lacks some tests, or specification on how it is supposed to work.
 
 ## Basic functionality
 
-Commandline arguments
+Command line arguments
 * `[ ]` `--ansi`
 * `[ ]` `--dry-run`
 * `[x]` `--env-file`
@@ -38,14 +39,15 @@ Top level keys:
 
 This option is reused to provide a way to prepare the process to run.
 
-Commandline arguments:
-* `[x]` `--build-arg` - arguments in format `<key>=<value>`, provided as environemnt variable to the build command.
+Command line arguments:
+* `[x]` `--build-arg` - arguments in format `<key>=<value>`,
+provided as environment variable to the build command.
 
 Service keys:
 * `[x]` `build`
 
 Building process executes commands defined in the `build` key for a service.
-Currently `build` key can have `shell_sequence` which is a list of shell commands to execute,
+Currently `build` key can have `shell_sequence` which is a list of shell commands to execute
 and general environment definition (`environment`, `env_file`, `inherit_env`).
 If a shell command is provided as a list, it is a regular process call.
 
@@ -86,7 +88,7 @@ If the service to build depends on a different service, the dependency is built 
 
 Shows config after merges and other processing.
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--format` `[yaml|json]`
 * `[ ]` `--no-consistency`
 * `[x]` `--no-interpolate`
@@ -96,7 +98,7 @@ Commandline arguments:
 * `[x]` `--quiet|-q`
 * `[x]` `--services`
 
-Toplevel config keys:
+Top level config keys:
 * `[x]` `services`
 
 Note that merging configs is experimental and requires far more testing.
@@ -120,7 +122,7 @@ See `build` which prepares the process to run.
 
 Stops services and triggers `clean` section for each service.
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--timeout|-t` - shutdown timeout in seconds.
 
 Service keys:
@@ -145,14 +147,15 @@ Big no-no for security reasons. This tool is not about executing arbitrary comma
 
 Lists processes paths used to start a service.
 
-Note that for services defined with `shell: true` you get simply a `<shell>` string.
+Note that for services defined with `shell: true` you get a `<shell>` string.
 It is a shell provided by the Python [`subprocess` module](https://docs.python.org/3/library/subprocess.html).
 
 For regular process calls (`shell: false`) the binary is always resolved with `shutil.which`.
-Note that this resulution happens in the main script context.
+Note that this resolution happens in the main script context.
 Environment variables specified for certain services does not matter for the lookup.
 
-Note that the path resolution might depend on the `build`/`clean` command execution sequence or your virtual environment.
+Note that the path resolution might depend on the `build`/`clean`
+command execution sequence or your virtual environment.
 
 See the warning in https://docs.python.org/3/library/subprocess.html#subprocess.Popen
 and https://docs.python.org/3/library/shutil.html#shutil.which
@@ -161,12 +164,12 @@ and https://docs.python.org/3/library/shutil.html#shutil.which
 
 Sends a signal to services.
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--signal|-s` Signal to send, by default SIGKILL
 
 Note that this option is independent from the service option `stop_signal`.
 
-Note that this is very low level feature and does not handle child processes.
+Note that this is a very low level feature and does not handle child processes.
 Only the top level process of a service receives the signal.
 If you want to stop the service use `stop` (second `stop` triggers forced kill).
 
@@ -178,7 +181,7 @@ Show logs from the services.
 Only certain window of recent logs is stored for each process.
 There are no advanced logging storage drivers.
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--follow|-f`
 * `[x]` `--with-context`
 * `[x]` `--no-color`
@@ -202,7 +205,7 @@ Service keys:
 
 ## ~~ls~~
 
-Not applicable. There is no central database/daemon that could be asked for all composeit projects.
+Not applicable. There is no central database/daemon that could be asked for all `composeit` projects.
 On Windows, the pipe paths could be listed perhaps, but on Linux whole filesystem would be scanned.
 
 This command does not fit the ad hoc nature of the `composeit` daemon.
@@ -222,7 +225,7 @@ Not applicable. `port` option is not handled in services YAML specification too.
 Shows the status of services.
 When server is not running, lists the services based on the config.
 
-Commandline arguments:
+Command line arguments:
 * `[ ]` `--all|-a` - not sure if it is applicable
 * `[ ]` `--filter` - maybe some day
 * `[~]` `--format` - experimental, and not consistent
@@ -240,13 +243,13 @@ Downloading binaries from the web some day? Not likely.
 ## ~~push~~
 
 Not implemented. Not applicable.
-Downloading binaries to the web some day? Not likely.
+Uploading binaries to the web some day? Not likely.
 
 ## restart
 
 Restarts processes.
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--no-deps`
 * `[x]` `--timeout|-t`
 
@@ -267,7 +270,7 @@ Starts services
 
 Stops services
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--timeout|-t`
 
 ## top
@@ -280,7 +283,7 @@ Not implemented. Maybe if there is pause...
 
 ## up
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--abort-on-container-exit`
 * `[ ]` `--always-recreate-deps`
 * `[x]` `--attach`
@@ -295,7 +298,7 @@ Commandline arguments:
 * `[x]` `--no-color`
 * `[x]` `--no-deps`
 * `[x]` `--no-log-prefix`
-* `[x]` `--no-start`		Don't start the services after creating them.
+* `[x]` `--no-start`		Do not start the services after creating them.
 * `[ ]` `--remove-orphans` When config update is supported
 * `[ ]` `--scale` Maybe some day
 * `[x]` `-t|--timeout`
@@ -305,9 +308,9 @@ Commandline arguments:
 
 ## version
 
-Show composeit version and the system version.
+Show `composeit` version and the system version.
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `-f|--format`
 * `[x]` `--short`
 
@@ -315,7 +318,7 @@ Commandline arguments:
 
 Wait for any of the services to stop
 
-Commandline arguments:
+Command line arguments:
 * `[x]` `--down-project`
 
 ## _watch_
@@ -328,7 +331,7 @@ Would require more explicit dependencies than the current approach to build.
 composeit
 * `[~]` variable substitution
 * `[ ]` labels
-* `[ ]` healthcheks
+* `[ ]` health checks
 * `[ ]` scaling
 * `[ ]` ulimit, maybe on Linux
 * `[ ]` cap add/drop, could be done on Linux I guess, but would require root

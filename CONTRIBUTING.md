@@ -19,7 +19,7 @@ Format the code with `black`.
 
 As usual with a Python package.
 
-Prepare the virtual environemnt.
+Prepare the virtual environment.
 ```
 python -m venv venv
 ```
