@@ -161,6 +161,12 @@ def main():
         type=float,
         help="Maximal wait time for services",
     )
+    parser_up.add_argument(
+        "--no-server",
+        default=False,
+        action="store_true",
+        help="Do not start process server",
+    )
 
     # --wait-timeout makes no sense, but requires also the following value filtering
     not_for_detached = ["-d", "--detach", "--abort-on-container-exit", "--wait"]
@@ -175,6 +181,12 @@ def main():
     )
     parser_start.add_argument(
         "--no-deps", default=False, action="store_true", help="Do not start dependent services"
+    )
+    parser_start.add_argument(
+        "--no-server",
+        default=False,
+        action="store_true",
+        help="Do not start process server",
     )
 
     parser_build = subparsers.add_parser("build", help="Build the services")
@@ -513,6 +525,9 @@ def main():
 
             if options.command == "up":
                 if options.detach or options.wait:
+                    if options.no_server:
+                        raise Exception("Detach in conflict with --no-server option")
+
                     without_detach = lambda x: x not in not_for_detached
                     up = sys.argv.index("up")
                     filtered_argv = sys.argv[:up] + list(filter(without_detach, sys.argv[up:]))
@@ -564,10 +579,17 @@ def main():
                             no_log_prefix=options.no_log_prefix,
                             no_color=options.logs_no_color,
                             timestamps=options.timestamps,
+                            no_server=options.no_server,
                         )
                     )
             elif options.command == "start":
-                return asyncio.run(compose.start(services, no_deps=options.no_deps))
+                return asyncio.run(
+                    compose.start(
+                        services,
+                        no_deps=options.no_deps,
+                        no_server=options.no_server,
+                    )
+                )
             elif options.command == "build":
                 return asyncio.run(compose.build(services))
             elif options.command == "images":
@@ -627,6 +649,10 @@ def main():
     except FileNotFoundError as ex:
         cfg_log.debug(get_stack_string())
         cfg_log.error(f"File not found {ex.filename}")
+        return -1
+    except Exception as ex:
+        cfg_log.debug(get_stack_string())
+        cfg_log.error(f"{ex}")
         return -1
     else:
         parser.print_help()

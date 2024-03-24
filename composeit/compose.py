@@ -205,6 +205,7 @@ class Compose:
         no_log_prefix=False,
         no_color=False,
         timestamps=False,
+        no_server=False,
     ):
         server_up = await self.check_server_is_running()
         if server_up:
@@ -214,6 +215,7 @@ class Compose:
         else:
             return await self.watch_services(
                 services=services,
+                start_server=not no_server,
                 execute_build=execute_build,
                 abort_on_exit=abort_on_exit,
                 code_from=code_from,
@@ -889,6 +891,14 @@ class Compose:
 
             sleep_time = 0.05
             end = time.time() + wait_timeout if wait_timeout is not None else None
+            interrupted = False
+
+            def signal_handler(signal, frame):
+                nonlocal end, interrupted
+                end = time.time()
+                interrupted = True
+
+            signal.signal(signal.SIGINT, signal_handler)
 
             while end is None or time.time() < end:
                 try:
@@ -898,7 +908,7 @@ class Compose:
                 except:
                     pass
 
-                if not wait:
+                if not wait or interrupted:
                     break
 
                 # Last try will nost likely not happen
@@ -906,6 +916,9 @@ class Compose:
                     sleep_time = min(max(0, end - time.time()), sleep_time)
                 time.sleep(sleep_time)
                 sleep_time = min(2 * sleep_time, 1)
+
+            if interrupted:
+                return 2
 
             print("Server is not running")
             return 1
@@ -1322,6 +1335,7 @@ class Compose:
 
             server_task: Optional[asyncio.Task] = None
             if start_server:
+                self.logger.debug("Starting server")
                 server_task = self.start_server()
 
             service_log_handler = logging.StreamHandler(stream=sys.stderr)
