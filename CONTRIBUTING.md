@@ -3,6 +3,9 @@
 Contributions are welcome!
 Open [an issue](https://github.com/Bajron/composeit/issues/new) or send a pull request.
 
+Note the project is still in early phase (see [TODO.md](TODO.md) and [COMPOSE.md](COMPOSE.md)).
+Ideas and remarks are probably more valuable than big code contributions at this point.
+
 This document describes setup for local development and testing.
 
 ## Style
@@ -64,6 +67,18 @@ pytest --ignore=tests/integration
 Static analysis
 ```
 mypy --check-untyped-defs composeit
+```
+
+## Thorough testing
+
+Install tox
+```
+pip install tox
+```
+
+Run tox
+```
+tox
 ```
 
 ## Manual test

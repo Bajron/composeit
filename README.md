@@ -1,13 +1,16 @@
 # composeit
 
+Process composing utility
+
 ## Notice
 
 This package is still during prototyping / intensive development.
 
 Currently it is as a toy project, not a production ready solution.
+Checkout a rough plan of development in [TODO.md](TODO.md) and [COMPOSE.md](COMPOSE.md)
 
-It might be just good enough for your use case.
-See the similar tools section below if you are looking for a mature solution.
+It might be just good enough for your use case, but no guarantees.
+See the similar tools section at the end if you are looking for a mature solution.
 
 ## Purpose
 
@@ -45,38 +48,45 @@ cd examples/unios
 composeit -up # ctrl+c to stop
 ```
 
-## Why?
+## Documentation
 
-I wanted to organize a couple of processes on Windows, but I could not find a package that does that.
+See [COMPOSE.md](COMPOSE.md) for features comparison to `docker-compose`.
+The document is created for tracking and explaining ideas.
 
-I wanted `docker-compose` without Docker.
+Run the tool itself for more info about certain options.
+```
+composeit --help
+```
+or
+```
+composeit <command> --help
+```
 
-There is `supervisor` that could do the trick, but it is not supported on Windows.
-I also is quite a serious package...
+## Ad hoc process server
 
-There are similar things like `pypyr` or `prefect`, but they kind of do a different thing.
-I wanted to organize a set of long running processes, not a pipeline.
+To achieve certain features with the docker daemon missing
+an ad hoc HTTP server is created that listens on a named pipe.
 
-Later I also found `honcho`, seems ok for the task.
+The pipe is created in the project directory on Linux.
+On Windows a certain pipe is created in `.\\pipe\\`.
+Default access rights are applied.
 
-There is a package called `just-compose` (wanted that name ;( ).
-I found it late. It seems to be kind of what I want.
-I could not find a documentation page for this one.
-The example seems to be quite promising though.
-The PyPy page suggests some specific use case, so I did not try it really.
-It does seem similar to `docker-compose` yaml.
-This could be what I wanted, but...
+## Known issues
 
-I figured I can write it myself, have some fun and learn a little bit of asyncio by the way.
+### Windows
 
+* Process handling on Windows is very different from Linux (e.g. signal suporrt).
+There is no real graceful shutdown for the spawned processes.
 
-## TODO
-Checkout `poetry` and `pipx`
+* Note that on Windows environment variable names in Python are
+[always uppercase](https://docs.python.org/3/library/os.html#os.environ)!
+This may lead to some unexpected expansions if your variables are not all uppercase.
 
 ## Thanks
 
-`python-dotenv` was a great example of setting up a Python project for me.
-Loading environemnt and variable expansion uses its implementation.
+[`python-dotenv`](https://github.com/theskumar/python-dotenv)
+was a great example of setting up a Python project for me.
+Loading environment and variable expansion uses its implementation.
 
 I did not have patience to wait for my proposals there.
 This package uses my fork of the package.
@@ -84,12 +94,43 @@ https://github.com/Bajron/python-dotenv/tree/v1.1.0
 
 For this reason separate virtual environment or `pipx` is recommended to avoid a versioning clash.
 
+## Why?
+
+I wanted to organize a couple of processes on Windows, but I could not find a package that does that.
+
+I wanted [`docker-compose`](https://docs.docker.com/compose/) without Docker.
+
+There is [`supervisor`](https://pypi.org/project/supervisor/) that could do the trick,
+but it is not supported on Windows. It also is quite a serious package...
+
+There are similar things like [`pypyr`](https://pypi.org/project/pypyr/)
+or [`prefect`](https://pypi.org/project/prefect/), but they do a different thing.
+I wanted to organize a set of long running processes, not a pipeline.
+
+Later I also found [`honcho`](https://pypi.org/project/honcho/), seems ok for the task.
+
+There is also a package called [`just-compose`](https://pypi.org/project/just-compose/) (wanted that name! ;( ).
+I found it late. It seems to be kind of what I want.
+The example seems to be quite promising.
+The PyPy page suggests some specific use case, and I did not try it really.
+It does seem similar to [`docker-compose` yaml](https://docs.docker.com/compose/compose-file/).
+This could be what I wanted, but...
+
+I figured I can write it myself, have some fun
+and learn a little bit of Python and `asyncio` by the way.
+
 ## Similar tools
 
 It seems creating own compose-like tool is not that uncommon :)
 
-Checkout these projects too:
+Checkout these projects too for process organization:
 * https://github.com/F1bonacc1/process-compose
+* https://pypi.org/project/just-compose/
+* https://pypi.org/project/honcho/
+* https://pypi.org/project/supervisor/
+* https://docs.docker.com/compose/
 
 You might be interested in these as well:
-* https://docs.docker.com/compose/
+* https://pypi.org/project/pypyr/ for pipeline orchestration
+* https://pypi.org/project/prefect/ for pipeline orchestration
+* https://github.com/theskumar/python-dotenv for `.env` files handling
