@@ -437,6 +437,8 @@ def main():
 
     cfg_log.debug(f"Project name: {project_name}")
 
+    profiles = options.profile or os.environ.get("COMPOSEIT_PROFILES", "").split(",")
+
     env_files = [e.absolute() for e in options.env_file]
 
     # NOTE: evaluate all paths from the commandline before changing working directory
@@ -478,7 +480,7 @@ def main():
             project_name,
             working_directory,
             service_files,
-            profiles=options.profile,
+            profiles=profiles,
             verbose=options.verbose,
             use_color=use_color,
             defer_config_load=defer_config_load,

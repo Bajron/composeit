@@ -57,10 +57,7 @@ def test_restarting_dependencies(process_cleaner):
     service_directory = tests_directory / "projects" / "depends_on"
 
     try:
-        # FIXME: verbose for debugging on github
-        up = subprocess.Popen(
-            ["composeit", "--verbose", "up"], cwd=service_directory, stdout=subprocess.PIPE
-        )
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
         process_cleaner.append(up)
 
         wait_for_server_line(up)

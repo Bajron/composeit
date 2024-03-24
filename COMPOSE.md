@@ -24,7 +24,7 @@ Commandline arguments
 Environment variables
 * `[x]` `COMPOSEIT_FILE`
 * `[ ]` `COMPOSEIT_PARALLEL_LIMIT`
-* `[ ]` `COMPOSEIT_PROFILES`
+* `[x]` `COMPOSEIT_PROFILES`
 * `[ ]` `COMPOSEIT_IGNORE_ORPHANS`
 * `[x]` `COMPOSEIT_PROJECT_NAME`
 

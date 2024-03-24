@@ -27,10 +27,10 @@ def main():
     sleep = options.time
     while run:
         print(counter, flush=True)
-        if sleep > 0.1:
+        if sleep > 0.02:
             end = time.time() + sleep
-            while time.time() < end:
-                time.sleep(min(end - time.time(), 0.1))
+            while time.time() < end and run:
+                time.sleep(min(end - time.time(), 0.02))
         else:
             time.sleep(options.time)
         counter += options.delta

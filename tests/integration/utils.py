@@ -13,10 +13,23 @@ from typing import List, Optional, Tuple, Union
 tests_directory = pathlib.Path(__file__).parent
 
 
+# TODO: this is risky approach because of filled up pipes
 def wait_for_server_line(up: subprocess.Popen):
     assert up.stdout is not None
     first_line = up.stdout.readline().decode()
     assert first_line.startswith("Server created")
+
+
+def eat_stdout(p: subprocess.Popen, show=False):
+    def eat():
+        while p.poll() is None and p.stdout is not None:
+            l = p.stdout.readline()
+            if not l:
+                break
+            if show:
+                print(l)
+
+    threading.Thread(target=eat).start()
 
 
 # composeit processes usually spawn additional python processes
@@ -139,7 +152,6 @@ def ps_wait_for(service_directory, *args, service, state, **kwargs):
 def wait_for_ps(service_directory, *args, services=None, timeout=30):
     end_time = time.time() + timeout
     states = None
-    print(args)
     while states is None and time.time() < end_time:
         states = ps(service_directory, *args, services=services)
         time.sleep(0.0625)

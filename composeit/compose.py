@@ -81,6 +81,9 @@ class Compose:
             self.logger.setLevel(logging.INFO)
 
         self.communication_pipe: str = get_comm_pipe(working_directory, project_name)
+
+        self.logger.debug(f"Working directory: {self.working_directory}")
+        self.logger.debug(f"Project name: {self.project_name}")
         self.logger.debug(f"Communication pipe: {self.communication_pipe}")
 
         self.use_colors: bool = use_color
@@ -90,6 +93,7 @@ class Compose:
         self.service_config: Optional[dict] = None
 
         self.profiles: List[str] = profiles or []
+        self.logger.debug(f"Profiles: {self.profiles}")
 
         self.depending: Optional[Mapping[str, Iterable[str]]] = None
         self.depends: Optional[Mapping[str, Iterable[str]]] = None
@@ -590,16 +594,14 @@ class Compose:
 
     def make_images_session(self, services: Optional[List[str]] = None):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/") as response:
-                compose_data = await response.json()
-                project = compose_data["project_name"]
-                working_directory = compose_data["working_directory"]
+            remote = ComposeProxy(session, self)
+            project = await remote.get_project()
+            assert remote.directory_data is not None
+            working_directory = remote.directory_data["working_directory"]
 
             nonlocal services
             if services is None:
-                async with session.get(f"/{project}") as response:
-                    project_data = await response.json()
-                    services = project_data["services"]
+                services = remote.get_project_data()["services"]
 
             service_data = []
             for s in services:
@@ -930,7 +932,7 @@ class Compose:
 
     def get_service_json(self, service_name):
         s = self.services[service_name]
-        return {
+        j = {
             "sequence": s.sequence,
             "name": s.name,
             "state": s.get_state(),
@@ -944,6 +946,8 @@ class Compose:
             "pobject": s.popen_kw,
             "config": s.service_config,
         }
+        self.logger.debug(f"{j}")
+        return j
 
     async def get_service(self, request: web.Request):
         self._get_project(request)
@@ -1134,7 +1138,8 @@ class Compose:
     async def _restart_in_sequence(self, sequence, timeout=None):
         for s in sequence:
             try:
-                await asyncio.wait_for(self.services[s].stop(), timeout)
+                # NOTE: shielded, because we want this stop to run, so the second one is force stop
+                await asyncio.wait_for(asyncio.shield(self.services[s].stop()), timeout)
             except asyncio.TimeoutError:
                 self.logger.warning(f"Timeout when stopping {s}")
                 await self.services[s].stop()
@@ -1384,30 +1389,35 @@ class Compose:
             self.logger.error(f"Error response: {ex}")
         return 3
 
-    async def execute_with_connector(self, connector_function):
+    async def execute_with_connector(self, connector_function, **kwargs):
         self.logger.debug(f"Connect: {self.communication_pipe}")
         if os.name == "nt":
-            async with aiohttp.NamedPipeConnector(path=self.communication_pipe) as connector:
+            async with aiohttp.NamedPipeConnector(
+                path=self.communication_pipe, **kwargs
+            ) as connector:
                 return await connector_function(connector)
         else:
-            async with aiohttp.UnixConnector(path=self.communication_pipe) as connector:
+            async with aiohttp.UnixConnector(path=self.communication_pipe, **kwargs) as connector:
                 return await connector_function(connector)
 
-    async def execute_client_session(self, session_function):
+    async def execute_client_session(self, session_function, connector_options=None):
         async def with_connector(connector):
             hostname = gethostname()
             async with aiohttp.ClientSession(
                 base_url=f"http://{hostname}",
                 connector=connector,
                 raise_for_status=True,
+                timeout=aiohttp.ClientTimeout(sock_connect=10, connect=10),
             ) as session:
                 return await session_function(session)
 
-        return await self.execute_with_connector(with_connector)
+        return await self.execute_with_connector(with_connector, **(connector_options or {}))
 
     async def check_server_is_running(self):
         try:
-            data = await self.execute_client_session(self.make_server_check())
+            data = await self.execute_client_session(
+                self.make_server_check(), connector_options={"force_close": True}
+            )
             if not data:
                 return False
 
@@ -1418,7 +1428,7 @@ class Compose:
 
             return True
         except asyncio.TimeoutError as ex:
-            self.logger.warning(f"Timeout in server check: {ex}, assuming server is up")
+            self.logger.warning(f"Timeout in server check assuming server is up")
             return True
         except ClientConnectorError as ex:
             pass
@@ -1428,7 +1438,7 @@ class Compose:
 
     def make_server_check(self):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/", timeout=10) as response:
+            async with session.get(f"/", timeout=5) as response:
                 return await response.json()
 
         return client_session
@@ -1462,9 +1472,13 @@ class ComposeProxy:
         self.directory_data: Optional[dict] = None
         self.project_data: Optional[dict] = None
 
-    async def get_project(self):
+    async def get_directory_data(self):
         async with self.session.get(f"/") as response:
             self.directory_data = await response.json()
+        return self.directory_data
+
+    async def get_project(self):
+        await self.get_directory_data()
 
         if self.directory_data is not None:
             self.project = self.directory_data["project_name"]
@@ -1519,9 +1533,9 @@ async def run_server(app: Application, logger: logging.Logger, path: str, delete
         await runner.setup()
         sites: List[BaseSite] = []
         if os.name == "nt":
-            sites.append(NamedPipeSite(runner=runner, path=f"{path}"))
+            sites.append(NamedPipeSite(runner=runner, path=f"{path}", shutdown_timeout=20))
         else:
-            sites.append(UnixSite(runner=runner, path=f"{path}"))
+            sites.append(UnixSite(runner=runner, path=f"{path}", shutdown_timeout=20))
 
         for site in sites:
             await site.start()
@@ -1532,6 +1546,7 @@ async def run_server(app: Application, logger: logging.Logger, path: str, delete
 
         delay = 10
         while True:
+            logger.debug(f"Server sleep for {delay}")
             await asyncio.sleep(delay)
     finally:
         logger.debug("Cleanup after run_server")

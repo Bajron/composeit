@@ -80,8 +80,6 @@ class AsyncProcess:
         self.lout: logging.LoggerAdapter = self._adapt_logger(self._lout)
         self.lerr: logging.LoggerAdapter = self._adapt_logger(self._lerr)
         self.log: logging.LoggerAdapter = self._adapt_logger(self._log)
-        if verbose:
-            self.log.setLevel(logging.DEBUG)
 
         self.lout_keeper = LogKeeper(window=30)
         self.lerr_keeper = LogKeeper(window=30)
@@ -96,6 +94,8 @@ class AsyncProcess:
 
         self._log.addHandler(self.log_keeper)
         self._log.setLevel(logging.INFO)
+        if verbose:
+            self.log.setLevel(logging.DEBUG)
         self._log.propagate = False
 
         self._lout.setLevel(logging.INFO)
@@ -150,6 +150,7 @@ class AsyncProcess:
         self.restarting: bool = False
         self.terminated: bool = False
         self.terminated_and_done: bool = False
+        self.stopping: bool = False
         self.stopped: bool = True
         self.exception: Optional[Exception] = None
 
@@ -201,10 +202,9 @@ class AsyncProcess:
         elif self.restarting:
             return "restarting"
         elif self.stopped:
-            if self.start_time and not self.stop_time:
-                return "stopping"
-            else:
-                return "stopped"
+            return "stopped"
+        elif self.stopping:
+            return "stopping"
         else:
             if self.start_time is not None:
                 return "started"
@@ -351,6 +351,7 @@ class AsyncProcess:
                 **popen_kw,
             )
         self.start_time = time.time()
+        self.log.debug(f"Started at {self.start_time}")
         return process
 
     async def watch_stderr(self, process: asyncio.subprocess.Process):
@@ -390,16 +391,17 @@ class AsyncProcess:
         max_attempts = self.restart_policy_config["max_attempts"]
         attempt = 0
         self.log.debug(
-            f"Resolving restart for {self.name}, attempt={attempt}, terminated={self.terminated}, stopped={self.stopped}"
+            f"Resolving restart for {self.name}, attempt={attempt}, "
+            + f"terminated={self.terminated}, stopping={self.stopping}, stopped={self.stopped}"
         )
 
         while max_attempts == "infinite" or attempt < max_attempts:
             if self.terminated:
                 return False
 
-            if self.restart_policy in ["always", "unless-stopped"] and not self.stopped:
+            if self.restart_policy in ["always", "unless-stopped"] and not self.stop_requested():
                 restarted = await self._restart_process()
-            elif self.restart_policy == "on-failure" and self.rc != 0 and not self.stopped:
+            elif self.restart_policy == "on-failure" and self.rc != 0 and not self.stop_requested():
                 restarted = await self._restart_process()
             else:
                 return False
@@ -439,6 +441,10 @@ class AsyncProcess:
             #       All services can hang here by design
             self.log.debug("Awaiting start signal")
             await self.startup_semaphore.acquire()
+            # TODO: tidy up the state handling
+            self.stopped = False
+            self.log.debug("Start signal received")
+
             # While waiting for start, one can call build() or terminate()
             if self.terminated or not self.execute:
                 break
@@ -463,8 +469,10 @@ class AsyncProcess:
 
                     self.log.info(f"Restart policy is {self.restart_policy}")
                     process_started = await self._resolve_restart()
-                    self.stopped = not process_started
                     self.restarting = False
+                # FIXME: this may happen after start() / quick stop() and start()
+                #        It is here to allow start after natural stop
+                self.stopped = True
             except FileNotFoundError as ex:
                 self.log.error(f"Error running command {self.name} {ex}")
                 self.exception = ex
@@ -569,8 +577,8 @@ class AsyncProcess:
                 self.execute_build = request_build
 
             self.log.debug("Starting")
-            self.stopped = False
             self.startup_semaphore.release()
+            self.stopped = False
             return True
         else:
             self.log.warning("Does not seem to be stopped")
@@ -594,7 +602,7 @@ class AsyncProcess:
         await self._sleep(duration_to_seconds(sleep_time))
 
         # Check after a long sleep
-        if self.terminated or self.stopped:
+        if self.terminated or self.stop_requested():
             return False
 
         await self._start_process()
@@ -623,15 +631,22 @@ class AsyncProcess:
         if request_clean is not None:
             self.execute_clean = request_clean
 
-        if self.stopped and self.execute_clean:
+        if self.stop_requested() and self.execute_clean:
             await self.resolve_clean()
 
+        self.stopping = True
         self.log.debug("Stopping")
-        self.stopped = True
+
         self._cancel_sleep()
         if self.rc is None and self.process is not None:
             self.log.debug("Sending terminate signal for stop")
             await self._terminate()
+        # NOTE: the process is stopped here, but the main loop notice it later
+        self.stopped = True
+        self.stopping = False
+
+    def stop_requested(self):
+        return self.stopping or self.stopped
 
     async def _stop_process(self, force=False):
         assert self.process is not None

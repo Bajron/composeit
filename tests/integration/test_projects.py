@@ -258,29 +258,24 @@ def test_start_by_pointed_file(process_cleaner):
 
 
 def test_start_by_file_with_name(process_cleaner):
-    try:
-        service_directory = tests_directory / "projects" / "simple"
-        service_file = service_directory / "composeit.yml"
+    service_directory = tests_directory / "projects" / "simple"
+    service_file = service_directory / "composeit.yml"
 
+    try:
         # Note no CWD set in here
         up1 = subprocess.Popen(
             ["composeit", "-f", str(service_file), "--project-name", "1", "up"],
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
         )
         process_cleaner.append(up1)
+        wait_for_ps(service_directory, "--project-name", "1")
+
         up2 = subprocess.Popen(
             ["composeit", "-f", str(service_file), "--project-name", "2", "up"],
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
         )
         process_cleaner.append(up2)
-
-        assert up1.stdout is not None
-        first_line = up1.stdout.readline().decode()
-        assert first_line.startswith("Server created")
-
-        assert up2.stdout is not None
-        first_line = up2.stdout.readline().decode()
-        assert first_line.startswith("Server created")
+        wait_for_ps(service_directory, "--project-name", "2")
 
         services = ps(tests_directory)
         assert services is None
@@ -354,12 +349,19 @@ def test_start_by_file_with_name(process_cleaner):
         assert services["simple1"] == "up"
         assert services["simple2"] == "up"
 
+        subprocess.call(
+            ["composeit", "--project-name", "2", "down", "-t", "4"],
+            cwd=service_directory,
+            timeout=10,
+        )
+        services = ps(service_directory, "--project-name", "2")
+        assert services is None
     finally:
         subprocess.call(
-            ["composeit", "--project-name", "1", "down", "-t", "4"], cwd=service_directory
+            ["composeit", "--project-name", "1", "down"], cwd=service_directory, timeout=10
         )
         subprocess.call(
-            ["composeit", "--project-name", "2", "down", "-t", "4"], cwd=service_directory
+            ["composeit", "--project-name", "2", "down"], cwd=service_directory, timeout=10
         )
         rc = up1.wait(5)
         assert rc is not None
