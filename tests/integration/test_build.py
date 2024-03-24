@@ -13,11 +13,14 @@ def test_build_single(process_cleaner):
         assert not root_build_file.exists()
 
         up = subprocess.Popen(
-            ["composeit", "start", "--no-start"], cwd=service_directory, stdout=subprocess.PIPE
+            ["composeit", "start", "--no-start"],
+            cwd=service_directory,
         )
         process_cleaner.append(up)
-        wait_for_server_line(up)
-        ShowLogs(up.stdout)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         states = ps(service_directory)
         assert all(v == "stopped" for v in states.values())
@@ -86,9 +89,12 @@ def test_build_on_up(process_cleaner):
         assert not build_file.exists()
         assert not root_build_file.exists()
 
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory)
         process_cleaner.append(up)
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
@@ -123,11 +129,12 @@ def test_no_build_on_up(process_cleaner):
         assert not build_file.exists()
         assert not root_build_file.exists()
 
-        up = subprocess.Popen(
-            ["composeit", "up", "--no-build"], cwd=service_directory, stdout=subprocess.PIPE
-        )
+        up = subprocess.Popen(["composeit", "up", "--no-build"], cwd=service_directory)
         process_cleaner.append(up)
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
@@ -162,9 +169,12 @@ def test_clean_single(process_cleaner):
         assert not build_file.exists()
         assert not root_build_file.exists()
 
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory)
         process_cleaner.append(up)
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         ps_wait_for(service_directory, service="leaf", state="exited", tries=20)
         states = ps(service_directory, services=["leaf"])
@@ -196,13 +206,12 @@ def test_build_env(process_cleaner):
         up: Optional[subprocess.Popen] = None
         assert not build_file.exists()
 
-        up = subprocess.Popen(
-            ["composeit", "up", "--build-arg", "B2=yy"],
-            cwd=service_directory,
-            stdout=subprocess.PIPE,
-        )
+        up = subprocess.Popen(["composeit", "up", "--build-arg", "B2=yy"], cwd=service_directory)
         process_cleaner.append(up)
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         ps_wait_for(service_directory, service="env_build", state="exited", tries=20)
         states = ps(service_directory, services=["env_build"])

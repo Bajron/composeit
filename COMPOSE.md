@@ -194,6 +194,7 @@ Service keys:
     * `[ ]` `driver`
         * `logging.config.dictConfig`
            uses `config` from `driver` level as the `logging` module config
+           See https://docs.python.org/3/library/logging.config.html#logging-config-dictschema
         * `logging.config.dictConfig.shared`
            uses `config` from `driver` level as the `logging` module config;
            configs are merged into a signle config and applied,

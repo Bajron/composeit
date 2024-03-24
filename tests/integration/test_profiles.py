@@ -50,7 +50,6 @@ def test_up_profiles(process_cleaner):
         up = subprocess.Popen(
             ["composeit", "--profile", "a", "--profile", "b", "up"],
             cwd=service_directory,
-            stdout=subprocess.PIPE,
         )
         process_cleaner.append(up)
         wait_for_ps(service_directory)

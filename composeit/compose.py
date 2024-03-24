@@ -880,6 +880,38 @@ class Compose:
 
         return client_session
 
+    async def server_info(self, wait: bool = False, wait_timeout: Optional[float] = None):
+        return await self.run_client_session(self.make_server_info_session(wait, wait_timeout))
+
+    def make_server_info_session(self, wait: bool, wait_timeout: Optional[float]):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = ComposeProxy(session, self)
+
+            sleep_time = 0.05
+            end = time.time() + wait_timeout if wait_timeout is not None else None
+
+            while end is None or time.time() < end:
+                try:
+                    directory = await remote.get_directory_data()
+                    print(directory)
+                    return 0
+                except:
+                    pass
+
+                if not wait:
+                    break
+
+                # Last try will nost likely not happen
+                if end is not None:
+                    sleep_time = min(max(0, end - time.time()), sleep_time)
+                time.sleep(sleep_time)
+                sleep_time = min(2 * sleep_time, 1)
+
+            print("Server is not running")
+            return 1
+
+        return client_session
+
     def get_call_json(self):
         return {
             "project_name": self.project_name,

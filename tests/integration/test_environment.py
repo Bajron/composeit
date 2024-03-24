@@ -12,10 +12,12 @@ def test_environment_expansions(process_cleaner):
         up = subprocess.Popen(
             ["composeit", "up", "--no-start"],
             cwd=service_directory,
-            stdout=subprocess.PIPE,
         )
 
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         logs = LogsGatherer(
             service_directory, ["env_test_map", "env_test_list", "env_test_suppress"]

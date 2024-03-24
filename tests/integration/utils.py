@@ -13,7 +13,8 @@ from typing import List, Optional, Tuple, Union
 tests_directory = pathlib.Path(__file__).parent
 
 
-# TODO: this is risky approach because of filled up pipes
+# NOTE: avoid this. It requires a pipe to Popen which must be emptied timely.
+# See eat_stdout or ShowLogs
 def wait_for_server_line(up: subprocess.Popen):
     assert up.stdout is not None
     first_line = up.stdout.readline().decode()
@@ -141,6 +142,10 @@ def ps_wait(service_directory, *args, services=None, sleep=0, tries=5, until):
             break
         time.sleep(sleep)
         states = ps(service_directory, *args, services=services)
+
+
+def all_up(services):
+    return all(s == "up" for s in services.values())
 
 
 def ps_wait_for(service_directory, *args, service, state, **kwargs):

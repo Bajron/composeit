@@ -10,11 +10,12 @@ def test_restarting(process_cleaner):
         up = subprocess.Popen(
             ["composeit", "--verbose", "up", "one_shot"],
             cwd=service_directory,
-            stdout=subprocess.PIPE,
         )
         process_cleaner.append(up)
-        wait_for_server_line(up)
-        ShowLogs(up.stdout)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         # always policy brings the service up on each server start (note we started only "one_shot")
         ps_wait_for(service_directory, service="always", state="up")

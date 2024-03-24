@@ -7,10 +7,10 @@ def test_dependencies(process_cleaner):
     service_directory = tests_directory / "projects" / "depends_on"
 
     try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory)
         process_cleaner.append(up)
 
-        wait_for_server_line(up)
+        ps_wait(service_directory, until=all_up)
 
         states = ps(service_directory)
         assert all(map(lambda x: x == "up", states.values()))
@@ -57,10 +57,10 @@ def test_restarting_dependencies(process_cleaner):
     service_directory = tests_directory / "projects" / "depends_on"
 
     try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory)
         process_cleaner.append(up)
 
-        wait_for_server_line(up)
+        ps_wait(service_directory, until=all_up)
 
         # Just close independent service
         subprocess.run(["composeit", "stop", "leaf"], cwd=service_directory)
@@ -99,9 +99,9 @@ def test_restarting_dependencies(process_cleaner):
         assert states["root"] == "up"
 
         log.stop()
+        # Zero in the logs signals application start
         assert log.get_service_ints("leaf").count(0) == 2
         assert log.get_service_ints("root").count(0) == 3
-
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
         rc = up.wait(5)
@@ -112,9 +112,7 @@ def test_up_no_deps(process_cleaner):
     service_directory = tests_directory / "projects" / "depends_on"
 
     try:
-        up = subprocess.Popen(
-            ["composeit", "up", "leaf", "--no-deps"], cwd=service_directory, stdout=subprocess.PIPE
-        )
+        up = subprocess.Popen(["composeit", "up", "leaf", "--no-deps"], cwd=service_directory)
         process_cleaner.append(up)
 
         ps_wait_for(service_directory, service="leaf", state="up")

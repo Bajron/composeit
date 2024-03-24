@@ -8,11 +8,12 @@ def test_attach(process_cleaner):
     service_directory = tests_directory / "projects" / "input"
 
     try:
-        up = subprocess.Popen(
-            ["composeit", "up", "--no-start"], cwd=service_directory, stdout=subprocess.PIPE
-        )
+        up = subprocess.Popen(["composeit", "up", "--no-start"], cwd=service_directory)
         process_cleaner.append(up)
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         log = LogsGatherer(service_directory, ["echo"], marker_filter="")
         process_cleaner.append(log.process)

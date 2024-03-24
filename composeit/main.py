@@ -364,6 +364,21 @@ def main():
         help="Down project when service stops",
     )
 
+    # TODO: formats etc.
+    parser_wait = subparsers.add_parser("server_info", help="Show the server status")
+    parser_wait.add_argument(
+        "--wait",
+        default=False,
+        action="store_true",
+        help="Wait for the server to appear",
+    )
+    parser_wait.add_argument(
+        "--wait-timeout",
+        default=None,
+        type=float,
+        help="Wait time",
+    )
+
     options = parser.parse_args()
 
     if options.verbose:
@@ -473,6 +488,7 @@ def main():
             "stop",
             "down",
             "config",
+            "server_info",
             "version",
         ]
 
@@ -601,6 +617,10 @@ def main():
                 return asyncio.run(compose.top(services))
             elif options.command == "wait":
                 return asyncio.run(compose.wait(services, down_project=options.down_project))
+            elif options.command == "server_info":
+                return asyncio.run(
+                    compose.server_info(wait=options.wait, wait_timeout=options.wait_timeout)
+                )
             else:
                 cfg_log.error(f"Unhandled option {options.command}")
                 return 10

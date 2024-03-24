@@ -9,15 +9,18 @@ from .utils import *
 def test_up_simple_down_on_side(process_cleaner):
     service_directory = tests_directory / "projects" / "simple"
 
-    up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
-    process_cleaner.append(up)
+    try:
+        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        process_cleaner.append(up)
+        wait_for_server_line(up)
+        ShowLogs(up.stdout)
 
-    wait_for_server_line(up)
-
-    subprocess.call(["composeit", "down"], cwd=service_directory)
-
-    rc = up.wait(5)
-    assert rc is not None
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        rc = up.wait(5)
+        assert rc is not None
+    finally:
+        subprocess.call(["composeit", "down"], cwd=service_directory)
+        rc = up.wait(5)
 
 
 def test_blocking_up():
@@ -30,7 +33,7 @@ def test_blocking_up():
         assert code == 0
 
         services = ps(service_directory)
-        assert all(s == "up" for s in services.values())
+        assert all_up(services)
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
 
@@ -55,10 +58,17 @@ def test_diagnostic_on_side(process_cleaner):
     service_directory = tests_directory / "projects" / "simple"
 
     try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        up = subprocess.Popen(
+            ["composeit", "up"],
+            cwd=service_directory,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         process_cleaner.append(up)
-
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         header_lines = 2
         services = 2
@@ -129,10 +139,17 @@ def test_logs_on_side(process_cleaner):
     service_directory = tests_directory / "projects" / "simple"
 
     try:
-        up = subprocess.Popen(["composeit", "up"], cwd=service_directory, stdout=subprocess.PIPE)
+        up = subprocess.Popen(
+            ["composeit", "up"],
+            cwd=service_directory,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         process_cleaner.append(up)
 
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"], cwd=service_directory
+        )
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
@@ -213,13 +230,17 @@ def test_logs_on_side(process_cleaner):
 
 
 def test_start_by_pointed_file(process_cleaner):
-    try:
-        service_directory = tests_directory / "projects" / "simple"
-        service_file = service_directory / "composeit.yml"
+    service_directory = tests_directory / "projects" / "simple"
+    service_file = service_directory / "composeit.yml"
 
+    try:
         # Note no CWD set in here
-        up = subprocess.Popen(["composeit", "-f", str(service_file), "up"], stdout=subprocess.PIPE)
-        wait_for_server_line(up)
+        up = subprocess.Popen(["composeit", "-f", str(service_file), "up"])
+        process_cleaner.append(up)
+
+        subprocess.check_call(
+            ["composeit", "-f", str(service_file), "server_info", "--wait", "--wait-timeout", "5"],
+        )
 
         services = ps(tests_directory)
         assert services is None
@@ -265,6 +286,7 @@ def test_start_by_file_with_name(process_cleaner):
         # Note no CWD set in here
         up1 = subprocess.Popen(
             ["composeit", "-f", str(service_file), "--project-name", "1", "up"],
+            stderr=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
         )
         process_cleaner.append(up1)
@@ -272,6 +294,7 @@ def test_start_by_file_with_name(process_cleaner):
 
         up2 = subprocess.Popen(
             ["composeit", "-f", str(service_file), "--project-name", "2", "up"],
+            stderr=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
         )
         process_cleaner.append(up2)

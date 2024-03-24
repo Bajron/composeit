@@ -30,7 +30,7 @@ def main():
         if sleep > 0.02:
             end = time.time() + sleep
             while time.time() < end and run:
-                time.sleep(min(end - time.time(), 0.02))
+                time.sleep(min(max(0, end - time.time()), 0.02))
         else:
             time.sleep(options.time)
         counter += options.delta

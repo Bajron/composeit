@@ -11,14 +11,13 @@ def test_kill(process_cleaner):
         os.environ["INTERRUPT_SIGNAL"] = "CTRL_C_EVENT" if os.name == "nt" else "SIGINT"
 
         up = subprocess.Popen(
-            [
-                "composeit",
-                "up",
-            ],
+            ["composeit", "up"],
             cwd=service_directory,
-            stdout=subprocess.PIPE,
         )
-        wait_for_server_line(up)
+        subprocess.check_call(
+            ["composeit", "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
+        )
 
         log = LogsGatherer(
             service_directory,

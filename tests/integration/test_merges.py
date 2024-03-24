@@ -9,10 +9,11 @@ def test_merging_separate_services(process_cleaner):
         s1 = service_directory / "s1.yml"
         s2 = service_directory / "s2.yml"
         args = ["-f", str(s1), "-f", str(s2)]
-        up = subprocess.Popen(
-            ["composeit", *args, "up"], cwd=service_directory, stdout=subprocess.PIPE
+        up = subprocess.Popen(["composeit", *args, "up"], cwd=service_directory)
+        subprocess.check_call(
+            ["composeit", *args, "server_info", "--wait", "--wait-timeout", "5"],
+            cwd=service_directory,
         )
-        wait_for_server_line(up)
 
         # NOTE: no config files passed to ps
         states = ps(service_directory)
