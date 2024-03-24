@@ -84,7 +84,7 @@ def test_restarting_dependencies(process_cleaner):
 
         # Restart crucial service, and all depenent services
         subprocess.run(["composeit", "restart", "root", "--timeout", "0"], cwd=service_directory)
-        ps_wait_for(service_directory, service="root", state="up")
+        ps_wait_for(service_directory, service="leaf", state="up")
         states = ps(service_directory)
         assert states["leaf"] == "up"
         assert states["middle"] == "up"
@@ -92,7 +92,7 @@ def test_restarting_dependencies(process_cleaner):
 
         subprocess.run(["composeit", "stop", "leaf"], cwd=service_directory)
         subprocess.run(["composeit", "restart"], cwd=service_directory)
-        ps_wait_for(service_directory, service="root", state="up")
+        ps_wait_for(service_directory, service="leaf", state="up")
         states = ps(service_directory)
         assert states["leaf"] == "up"
         assert states["middle"] == "up"
