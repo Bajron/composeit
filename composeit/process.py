@@ -653,7 +653,11 @@ class AsyncProcess:
 
         if force:
             self.log.warning("Killing the process, force kill triggered")
-            self.process.kill()
+            try:
+                self.process.kill()
+            except ProcessLookupError:
+                self.log.debug("Process already gone")
+                pass
             return
 
         try:
