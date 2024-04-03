@@ -446,7 +446,7 @@ def main():
     if project_name is None:
         project_name = os.environ.get("COMPOSEIT_PROJECT_NAME", None)
     if project_name is None:
-        project_name = service_files.get_project_name()
+        project_name = service_files.try_get_project_name()
     if project_name is None:
         project_name = (
             service_files.paths[0].parent.name

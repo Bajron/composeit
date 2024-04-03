@@ -23,6 +23,13 @@ class ServiceFiles:
                 return d["name"]
         return None
 
+    def try_get_project_name(self) -> Optional[str]:
+        try:
+            return self.get_project_name()
+        except:
+            pass
+        return None
+
     def get_parsed_files(self) -> List[dict]:
         self._assure_loaded()
         assert self.loaded_files is not None
