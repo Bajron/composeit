@@ -26,7 +26,51 @@ but we still get the advantage of readability and familiarity.
 Some of the features also will not work because we do not have the docker daemon.
 This is ok. Let's see what we can get.
 
-## Quick start
+## Installing
+
+Direct installation via git is the recommended way of installing the package.
+You can use:
+* git+https://github.com/Bajron/composeit.git
+* git+ssh://git@github.com/Bajron/composeit
+
+### pipx
+
+[`pipx`](https://pipx.pypa.io/) is a tool for installing
+Python command line tools in dedicated environments.
+Seems like a perfect match for `composeit`
+
+Get `pipx` and then:
+```
+pipx install https://github.com/Bajron/composeit
+```
+
+(until the package is public you can use `git+ssh://git@github.com/Bajron/composeit`)
+
+### pip
+
+Separate environment is recommended because of the custom `python-dotenv`
+```
+pip install --upgrade https://github.com/Bajron/composeit
+```
+
+### Official package isnot fully functional
+
+There is only a limited support for variable expansions.
+
+A package with a direct dependency (custom `python-dotenv` in our case) cannot be uploaded to PyPI.
+
+Some day:
+```
+pip install --upgrade composeit
+```
+...or similar with `pipx` should work as well.
+
+To make it fully functional you can add the custom `python-dotenv` with
+```
+pip install --upgrade python-dotenv@git+https://github.com/Bajron/python-dotenv.git@v1.1.0
+```
+
+### Quick start hacking this repository
 
 ```
 git clone https://github.com/Bajron/composeit
@@ -47,6 +91,8 @@ pip install -e .
 cd examples/unios
 composeit -up # ctrl+c to stop
 ```
+
+Also see [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Documentation
 
@@ -82,19 +128,20 @@ There is no real graceful shutdown for processes at the moment.
 [always uppercase](https://docs.python.org/3/library/os.html#os.environ)!
 This may lead to some unexpected expansions if your variables are not all uppercase.
 
-## Thanks
+## python-dotenv
 
 [`python-dotenv`](https://github.com/theskumar/python-dotenv)
 was a great example of setting up a Python project for me.
+
 Loading environment and variable expansion uses its implementation.
 
 I did not have patience to wait for my proposals there.
 This package uses my fork of the package.
 https://github.com/Bajron/python-dotenv/tree/v1.1.0
 
-For this reason separate virtual environment or `pipx` is recommended to avoid a versioning clash.
+For this reason separate virtual environment or `pipx` is recommended to avoid a version clash.
 
-## Why?
+## Why another tool?
 
 I wanted to organize a couple of processes on Windows, but I could not find a package that does that.
 
