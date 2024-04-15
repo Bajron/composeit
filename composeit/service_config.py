@@ -5,6 +5,7 @@ import shutil
 import dotenv
 import io
 import yaml
+import copy
 from pathlib import Path
 from .utils import update_dict
 from typing import Union, List, Optional, Dict, overload
@@ -230,3 +231,69 @@ def get_dict_from_env_list(
 
     entries = [make(e) for e in value_list]
     return {k: v if v is not None else os.environ.get(k, "") for d in entries for k, v in d.items()}
+
+
+def merge_configs(parsed_files):
+    base = copy.deepcopy(parsed_files[0])
+    for i in range(1, len(parsed_files)):
+        base = merge_in(base, parsed_files[i])
+    return base
+
+
+def merge_in(base, incoming):
+    # TODO any other top level keys?
+    base_svcs = base["services"]
+    for name, service in incoming["services"].items():
+        if name not in base_svcs:
+            base_svcs[name] = service
+        else:
+            base_svcs[name] = merge_services(base_svcs[name], service)
+    return base
+
+
+def merge_command_sequence(base, incoming):
+    for key, value in incoming.items():
+        if key not in base:
+            base[key] = value
+        else:
+            base_value = base[key]
+            if isinstance(value, list):
+                base_value += value
+            else:
+                base_value += [value]
+    return base
+
+
+def merge_services(base, incoming):
+    for key, value in incoming.items():
+        if key not in base:
+            base[key] = value
+        else:
+            base_value = base[key]
+            if key in ["command"]:  # TODO: which commands not to merge?
+                base[key] = value
+            elif key == ["build", "clean"]:
+                base[key] = merge_command_sequence(base[key], incoming[key])
+            elif isinstance(base_value, list):
+                if isinstance(value, list):
+                    base_value += value
+                elif isinstance(value, dict):
+                    # NOTE: this is not convertible back to a yaml, but can work...
+                    for k, v in value.items():
+                        base_value.append((k, v))
+                else:
+                    base_value += [value]
+            elif isinstance(base_value, dict):
+                if isinstance(value, dict):
+                    base_value.update(value)
+                elif isinstance(value, list):
+                    # NOTE: fallback to more general list
+                    base_value = [(k, v) for k, v in base_value.items()] + value
+                    base[key] = base_value
+                else:
+                    # TODO just throw? this is weird
+                    print("dict vs value")
+                    base_value[f"{value}"] = None
+            else:
+                base[key] = value
+    return base

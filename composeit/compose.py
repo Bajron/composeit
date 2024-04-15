@@ -9,13 +9,12 @@ import aiohttp
 import sys
 import pathlib
 import hashlib
-import copy
 import time
 from aiohttp import web, ClientConnectorError, ClientResponseError
 from json.decoder import JSONDecodeError
-from .service_config import get_signal, get_default_kill
+from .service_config import get_signal, get_default_kill, merge_configs
 from .log_utils import ComposeFormatter, build_format
-from typing import List, Dict, Optional, Union, Iterable, Mapping, Set
+from typing import List, Dict, Optional, Iterable, Mapping, Set
 
 from .log_utils import (
     JsonFormatter,
@@ -230,10 +229,8 @@ class Compose:
 
     def make_start_session(self, services=None, request_build=False, no_deps=False):
         async def run_client_commands(session: aiohttp.ClientSession):
-            remote = ComposeProxy(session, self)
-            project = await remote.get_project()
-            data = await remote.get_project_data()
-            existing_services = data["services"]
+            remote = self.make_proxy(session)
+            existing_services = await remote.get_services()
 
             if services is not None:
                 to_request = []
@@ -247,10 +244,7 @@ class Compose:
 
             bad_responses = 0
             for service in to_request:
-                response = await session.post(
-                    f"/{project}/{service}/start",
-                    json={"request_build": request_build, "no_deps": no_deps},
-                )
+                response = await remote.start_service(service, request_build, no_deps)
                 if response.status == 200:
                     print(service, await response.json())
                 else:
@@ -285,13 +279,9 @@ class Compose:
 
     def make_stop_session(self, services=None, request_clean=False, timeout=None):
         async def run_client_commands(session: aiohttp.ClientSession):
-            response = await session.get(f"/")
-            data = await response.json()
-            project = data["project_name"]
-
-            response = await session.get(f"/{project}")
-            data = await response.json()
-            existing_services = data["services"]
+            remote = self.make_proxy(session)
+            project = await remote.get_project()
+            existing_services = await remote.get_services()
 
             if services is not None:
                 for service in services:
@@ -300,10 +290,7 @@ class Compose:
                         continue
 
                     self.logger.debug(f"Stopping /{project}/{service}")
-                    request = lambda: session.post(
-                        f"/{project}/{service}/stop",
-                        json={"request_clean": request_clean},
-                    )
+                    request = lambda: remote.stop_service(service, request_clean=request_clean)
 
                     try:
                         response = await asyncio.wait_for(
@@ -317,9 +304,7 @@ class Compose:
                     if response.status == 200:
                         print(service, await response.json())
             else:
-                request = lambda: session.post(
-                    f"/{project}/stop", json={"request_clean": request_clean}
-                )
+                request = lambda: remote.stop_project(request_clean=request_clean)
 
                 try:
                     response = await asyncio.wait_for(request(), timeout=timeout)
@@ -344,7 +329,8 @@ class Compose:
 
     def make_restart_session(self, services=None, no_deps=False, timeout=None):
         async def run_client_commands(session: aiohttp.ClientSession):
-            project = await get_project(session)
+            remote = self.make_proxy(session)
+            project = await remote.get_project()
 
             specification = {"no_deps": no_deps}
             if timeout is not None:
@@ -379,13 +365,9 @@ class Compose:
 
     def make_kill_session(self, services=None, signal=9):
         async def run_client_commands(session: aiohttp.ClientSession):
-            response = await session.get(f"/")
-            data = await response.json()
-            project = data["project_name"]
-
-            response = await session.get(f"/{project}")
-            data = await response.json()
-            existing_services = data["services"]
+            remote = self.make_proxy(session)
+            project = await remote.get_project()
+            existing_services = await remote.get_services()
 
             if services is not None:
                 for service in services:
@@ -596,19 +578,16 @@ class Compose:
 
     def make_images_session(self, services: Optional[List[str]] = None):
         async def client_session(session: aiohttp.ClientSession):
-            remote = ComposeProxy(session, self)
-            project = await remote.get_project()
-            assert remote.directory_data is not None
-            working_directory = remote.directory_data["working_directory"]
+            remote = self.make_proxy(session)
+            directory_data = await remote.get_directory_data()
+            project = directory_data["project_name"]
+            working_directory = directory_data["working_directory"]
 
             nonlocal services
             if services is None:
-                services = remote.get_project_data()["services"]
+                services = await remote.get_services()
 
-            service_data = []
-            for s in services:
-                async with session.get(f"/{project}/{s}") as response:
-                    service_data.append(await response.json())
+            service_data = await remote.get_service_data(services)
 
             self.show_images(working_directory, project, service_data)
 
@@ -650,22 +629,16 @@ class Compose:
 
     def make_ps_session(self, services: Optional[List[str]] = None, **kwargs):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/") as response:
-                compose_data = await response.json()
-                project = compose_data["project_name"]
-                working_directory = compose_data["working_directory"]
+            remote = self.make_proxy(session)
+            directory_data = await remote.get_directory_data()
+            project = directory_data["project_name"]
+            working_directory = directory_data["working_directory"]
 
             nonlocal services
             if services is None:
-                async with session.get(f"/{project}") as response:
-                    project_data = await response.json()
-                    services = project_data["services"]
+                services = await remote.get_services()
 
-            service_data = []
-            for s in services:
-                async with session.get(f"/{project}/{s}") as response:
-                    service_data.append(await response.json())
-
+            service_data = await remote.get_service_data(services)
             self.show_service_status(working_directory, project, service_data, **kwargs)
 
         return client_session
@@ -767,16 +740,14 @@ class Compose:
 
     def make_top_session(self, services: Optional[List[str]] = None):
         async def client_session(session):
-            async with session.get(f"/") as response:
-                compose_data = await response.json()
-                project = compose_data["project_name"]
-                working_directory = compose_data["working_directory"]
+            remote = self.make_proxy(session)
+            directory_data = await remote.get_directory_data()
+            project = directory_data["project_name"]
+            working_directory = directory_data["working_directory"]
 
             nonlocal services
             if services is None:
-                async with session.get(f"/{project}") as response:
-                    project_data = await response.json()
-                    services = project_data["services"]
+                services = await remote.get_services()
 
             processes = []
             for s in services:
@@ -830,8 +801,8 @@ class Compose:
 
     def make_wait_for_up_session(self, services: Optional[List[str]] = None):
         async def client_session(session: aiohttp.ClientSession):
-            remote = ComposeProxy(session, self)
-            project = await remote.get_project()
+            remote = self.make_proxy(session)
+            await remote.get_project()
 
             nonlocal services
             if services is None:
@@ -839,11 +810,7 @@ class Compose:
 
             all_services_up = False
             while not all_services_up:
-                service_data = []
-                for s in services:
-                    async with session.get(f"/{project}/{s}") as response:
-                        service_data.append(await response.json())
-
+                service_data = await remote.get_service_data(services)
                 all_services_up = all([s["state"] == "started" for s in service_data])
 
         return client_session
@@ -858,8 +825,8 @@ class Compose:
 
     def make_wait_session(self, services: Optional[List[str]] = None, down_project=False):
         async def client_session(session: aiohttp.ClientSession):
-            remote = ComposeProxy(session, self)
-            project = await remote.get_project()
+            remote = self.make_proxy(session)
+            await remote.get_project()
 
             nonlocal services
             if services is None:
@@ -867,11 +834,7 @@ class Compose:
 
             any_service_down = False
             while not any_service_down:
-                service_data = []
-                for s in services:
-                    async with session.get(f"/{project}/{s}") as response:
-                        service_data.append(await response.json())
-
+                service_data = await remote.get_service_data(services)
                 any_service_down = any([s["state"] == "stopped" for s in service_data])
 
             if any_service_down and down_project:
@@ -887,7 +850,7 @@ class Compose:
 
     def make_server_info_session(self, wait: bool, wait_timeout: Optional[float]):
         async def client_session(session: aiohttp.ClientSession):
-            remote = ComposeProxy(session, self)
+            remote = self.make_proxy(session)
 
             sleep_time = 0.05
             end = time.time() + wait_timeout if wait_timeout is not None else None
@@ -911,7 +874,7 @@ class Compose:
                 if not wait or interrupted:
                     break
 
-                # Last try will nost likely not happen
+                # Last try will most likely not happen
                 if end is not None:
                     sleep_time = min(max(0, end - time.time()), sleep_time)
                 time.sleep(sleep_time)
@@ -1489,34 +1452,23 @@ class Compose:
 
         return client_session
 
-
-async def get_project_and_services(session: aiohttp.ClientSession):
-    project = await get_project(session)
-    existing_services = await get_services(session, project)
-    return project, existing_services
-
-
-async def get_project(session: aiohttp.ClientSession):
-    response = await session.get(f"/")
-    data = await response.json()
-    return data["project_name"]
-
-
-async def get_services(session: aiohttp.ClientSession, project):
-    response = await session.get(f"/{project}")
-    data = await response.json()
-    return data["services"]
+    def make_proxy(self, session: aiohttp.ClientSession):
+        return ComposeProxy(session, self.project_name, self.profiles)
 
 
 class ComposeProxy:
-    def __init__(self, session: aiohttp.ClientSession, compose: Compose) -> None:
+    def __init__(
+        self, session: aiohttp.ClientSession, project_name: Optional[str], profiles: List[str]
+    ) -> None:
         self.session = session
-        self.compose = compose
 
-        self.project = compose.project_name
+        self.project = project_name
+        self.project_confirmed = False
+
+        self.profiles = profiles
 
         self.directory_data: Optional[dict] = None
-        self.project_data: Optional[dict] = None
+        self.project_data: Dict[str, dict] = {}
 
     async def get_directory_data(self):
         async with self.session.get(f"/") as response:
@@ -1527,26 +1479,64 @@ class ComposeProxy:
         await self.get_directory_data()
 
         if self.directory_data is not None:
+            assert self.project == self.directory_data["project_name"]
             self.project = self.directory_data["project_name"]
+            self.project_confirmed = True
+        else:
+            self.project_confirmed = False
 
         return self.project
 
-    async def get_project_data(self, project=None):
-        if project is None:
+    async def _assure_project(self, project=None):
+        if project is None and self.project_confirmed:
             project = self.project
         if project is None:
             project = await self.get_project()
+        return project
 
-        async with self.session.get(
-            f"/{project}", params={"profile": self.compose.profiles}
-        ) as response:
-            self.project_data = await response.json()
+    async def get_project_data(self, project=None):
+        project = await self._assure_project(project)
+        async with self.session.get(f"/{project}", params={"profile": self.profiles}) as response:
+            self.project_data[project] = await response.json()
 
-        return self.project_data
+        return self.project_data[project]
 
     async def get_default_services(self):
         data = await self.get_project_data()
-        return data["profile_services"] if self.compose.profiles else data["default_services"]
+        return data["profile_services"] if self.profiles else data["default_services"]
+
+    async def get_services(self):
+        data = await self.get_project_data()
+        return data["services"]
+
+    async def get_service_data(self, services: List[str]):
+        project = await self._assure_project()
+        service_data: List[dict] = []
+        for service in services:
+            async with self.session.get(f"/{project}/{service}") as response:
+                service_data.append(await response.json())
+        return service_data
+
+    async def start_service(self, service: str, request_build: bool, no_deps: bool):
+        project = await self._assure_project()
+        return await self.session.post(
+            f"/{project}/{service}/start",
+            json={"request_build": request_build, "no_deps": no_deps},
+        )
+
+    async def stop_service(self, service: str, request_clean: bool):
+        project = await self._assure_project()
+        return await self.session.post(
+            f"/{project}/{service}/stop",
+            json={"request_clean": request_clean},
+        )
+
+    async def stop_project(self, request_clean: bool):
+        project = await self._assure_project()
+        return await self.session.post(
+            f"/{project}/stop",
+            json={"request_clean": request_clean},
+        )
 
 
 from aiohttp.web import (
@@ -1611,69 +1601,3 @@ def get_comm_pipe(directory_path: pathlib.Path, project_name: Optional[str] = No
         return r"\\.\pipe\composeit_" + f"{project_name}_{h}"
 
     return str(directory_path / f".{project_name}.daemon")
-
-
-def merge_configs(parsed_files):
-    base = copy.deepcopy(parsed_files[0])
-    for i in range(1, len(parsed_files)):
-        base = merge_in(base, parsed_files[i])
-    return base
-
-
-def merge_in(base, incoming):
-    # TODO any other top level keys?
-    base_svcs = base["services"]
-    for name, service in incoming["services"].items():
-        if name not in base_svcs:
-            base_svcs[name] = service
-        else:
-            base_svcs[name] = merge_services(base_svcs[name], service)
-    return base
-
-
-def merge_command_sequence(base, incoming):
-    for key, value in incoming.items():
-        if key not in base:
-            base[key] = value
-        else:
-            base_value = base[key]
-            if isinstance(value, list):
-                base_value += value
-            else:
-                base_value += [value]
-    return base
-
-
-def merge_services(base, incoming):
-    for key, value in incoming.items():
-        if key not in base:
-            base[key] = value
-        else:
-            base_value = base[key]
-            if key in ["command"]:  # TODO: which commands not to merge?
-                base[key] = value
-            elif key == ["build", "clean"]:
-                base[key] = merge_command_sequence(base[key], incoming[key])
-            elif isinstance(base_value, list):
-                if isinstance(value, list):
-                    base_value += value
-                elif isinstance(value, dict):
-                    # NOTE: this is not convertible back to a yaml, but can work...
-                    for k, v in value.items():
-                        base_value.append((k, v))
-                else:
-                    base_value += [value]
-            elif isinstance(base_value, dict):
-                if isinstance(value, dict):
-                    base_value.update(value)
-                elif isinstance(value, list):
-                    # NOTE: fallback to more general list
-                    base_value = [(k, v) for k, v in base_value.items()] + value
-                    base[key] = base_value
-                else:
-                    # TODO just throw? this is weird
-                    print("dict vs value")
-                    base_value[f"{value}"] = None
-            else:
-                base[key] = value
-    return base
