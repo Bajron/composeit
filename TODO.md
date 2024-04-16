@@ -5,6 +5,8 @@ Lose notes of things to do.
 * Deploy a package to PyPy
 * Expand documentation
 * Refactor server part vs. client part
+    * separate class with server code
+    * ComposeProxy to get stop(), ps(), etc. it can replace make_client_session
 * Use common helpers in all places (ComposeProxy etc.)
 * Cleanup process state handling
 * TODOs in the code :)

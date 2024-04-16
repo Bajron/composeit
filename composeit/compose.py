@@ -331,23 +331,16 @@ class Compose:
         async def run_client_commands(session: aiohttp.ClientSession):
             remote = self.make_proxy(session)
             project = await remote.get_project()
-
-            specification = {"no_deps": no_deps}
-            if timeout is not None:
-                specification["timeout"] = timeout
-            if services is not None:
-                specification["services"] = services
-
             if services is not None and len(services) == 1:
-                service = services[0]
-                response = await session.post(
-                    f"/{project}/{service}/restart",
-                    json=specification,
+                response = await remote.restart_service(
+                    services[0], no_deps=no_deps, timeout=timeout
                 )
                 if response.status == 200:
-                    print(service, await response.json())
+                    print(services[0], await response.json())
             else:
-                response = await session.post(f"/{project}/restart", json=specification)
+                response = await remote.restart_project(
+                    no_deps=no_deps, timeout=timeout, services=services
+                )
                 if response.status == 200:
                     print(project, await response.json())
 
@@ -374,25 +367,11 @@ class Compose:
                     if service not in existing_services:
                         self.logger.warning(f"{service} does not exist on the server, skipping")
                         continue
-
-                    self.logger.debug(f"Kill {signal} to /{project}/{service}")
-                    response = await session.post(
-                        f"/{project}/{service}/kill",
-                        json={"signal": signal},
-                        raise_for_status=False,
-                    )
+                    response = await remote.kill_service(service, signal)
+                    print(service, await response.json())
             else:
-                self.logger.debug(f"Kill {signal} to /{project}")
-                response = await session.post(
-                    f"/{project}/kill",
-                    json={"signal": signal},
-                    raise_for_status=False,
-                )
-
-            if response.status >= 500:
-                response.raise_for_status()
-
-            print(project, await response.json())
+                response = await remote.kill_project(signal)
+                print(project, await response.json())
 
             return 0 if 200 <= response.status < 300 else 1
 
@@ -423,44 +402,19 @@ class Compose:
         timestamps: Optional[bool] = None,
         prefix: Optional[bool] = None,
     ):
-        if context is None:
-            context = not follow
-
         async def stream_logs_response(session: aiohttp.ClientSession):
-            async with session.get(f"/") as response:
-                data = await response.json()
-                project = data["project_name"]
+            remote = self.make_proxy(session)
 
-            def logs_request():
-                params = [
-                    ("format", "json"),
-                    ("context", "on" if context else "no"),
-                    ("follow", "on" if follow else "no"),
-                ]
-                if since is not None:
-                    params.append(("since", since.isoformat()))
-                if until is not None:
-                    params.append(("until", until.isoformat()))
-                if tail is not None:
-                    params.append(("tail", f"{tail}"))
-
+            async def logs_request():
+                common_args = dict(
+                    follow=follow, context=context, since=since, until=until, tail=tail
+                )
                 if services is not None and len(services) == 1:
-                    service = services[0]
-                    return session.get(
-                        f"/{project}/{service}/logs",
-                        params=params,
-                        timeout=0,
-                    )
+                    return await remote.open_service_logs(services[0], **common_args)
                 else:
-                    if services:
-                        params += [("service", s) for s in services]
-                    return session.get(
-                        f"/{project}/logs",
-                        params=params,
-                        timeout=0,
-                    )
+                    return await remote.open_logs(services=services, **common_args)
 
-            async with logs_request() as response:
+            async with await logs_request() as response:
                 close_requested = False
 
                 def signal_handler(signal, frame):
@@ -508,15 +462,8 @@ class Compose:
 
     def make_attach_session(self, service: str, context: bool = False):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/") as response:
-                data = await response.json()
-                project = data["project_name"]
-
-            async with session.ws_connect(
-                f"/{project}/{service}/attach",
-                params={"format": "json", "context": "on" if context else "no"},
-                timeout=0,
-            ) as ws:
+            remote = self.make_proxy(session)
+            async with await remote.attach_to_service(service, context) as ws:
                 exit_requested = False
 
                 def signal_handler(signal, frame):
@@ -587,7 +534,7 @@ class Compose:
             if services is None:
                 services = await remote.get_services()
 
-            service_data = await remote.get_service_data(services)
+            service_data = await remote.get_services_data(services)
 
             self.show_images(working_directory, project, service_data)
 
@@ -638,7 +585,7 @@ class Compose:
             if services is None:
                 services = await remote.get_services()
 
-            service_data = await remote.get_service_data(services)
+            service_data = await remote.get_services_data(services)
             self.show_service_status(working_directory, project, service_data, **kwargs)
 
         return client_session
@@ -739,7 +686,7 @@ class Compose:
             self.logger.error("Server is not running")
 
     def make_top_session(self, services: Optional[List[str]] = None):
-        async def client_session(session):
+        async def client_session(session: aiohttp.ClientSession):
             remote = self.make_proxy(session)
             directory_data = await remote.get_directory_data()
             project = directory_data["project_name"]
@@ -749,10 +696,7 @@ class Compose:
             if services is None:
                 services = await remote.get_services()
 
-            processes = []
-            for s in services:
-                async with session.get(f"/{project}/{s}/top") as response:
-                    processes.extend(await response.json())
+            processes = await remote.get_services_top(services)
 
             header = [
                 ("uid", "UID", 16),
@@ -810,7 +754,7 @@ class Compose:
 
             all_services_up = False
             while not all_services_up:
-                service_data = await remote.get_service_data(services)
+                service_data = await remote.get_services_data(services)
                 all_services_up = all([s["state"] == "started" for s in service_data])
 
         return client_session
@@ -834,7 +778,7 @@ class Compose:
 
             any_service_down = False
             while not any_service_down:
-                service_data = await remote.get_service_data(services)
+                service_data = await remote.get_services_data(services)
                 any_service_down = any([s["state"] == "stopped" for s in service_data])
 
             if any_service_down and down_project:
@@ -1453,19 +1397,26 @@ class Compose:
         return client_session
 
     def make_proxy(self, session: aiohttp.ClientSession):
-        return ComposeProxy(session, self.project_name, self.profiles)
+        return ComposeProxy(
+            session, self.project_name, self.profiles, self.logger.getChild("proxy")
+        )
 
 
 class ComposeProxy:
     def __init__(
-        self, session: aiohttp.ClientSession, project_name: Optional[str], profiles: List[str]
+        self,
+        session: aiohttp.ClientSession,
+        project_name: Optional[str],
+        profiles: List[str],
+        logger: logging.Logger,
     ) -> None:
-        self.session = session
+        self.session: aiohttp.ClientSession = session
+        self.logger: logging.Logger = logger
 
-        self.project = project_name
-        self.project_confirmed = False
+        self.project: Optional[str] = project_name
+        self.project_confirmed: bool = False
 
-        self.profiles = profiles
+        self.profiles: List[str] = profiles
 
         self.directory_data: Optional[dict] = None
         self.project_data: Dict[str, dict] = {}
@@ -1509,13 +1460,21 @@ class ComposeProxy:
         data = await self.get_project_data()
         return data["services"]
 
-    async def get_service_data(self, services: List[str]):
+    async def get_services_data(self, services: List[str]):
         project = await self._assure_project()
         service_data: List[dict] = []
         for service in services:
             async with self.session.get(f"/{project}/{service}") as response:
                 service_data.append(await response.json())
         return service_data
+
+    async def get_services_top(self, services: List[str]):
+        project = await self._assure_project()
+        process_data: List[dict] = []
+        for service in services:
+            async with self.session.get(f"/{project}/{service}/top") as response:
+                process_data.extend(await response.json())
+        return process_data
 
     async def start_service(self, service: str, request_build: bool, no_deps: bool):
         project = await self._assure_project()
@@ -1536,6 +1495,115 @@ class ComposeProxy:
         return await self.session.post(
             f"/{project}/stop",
             json={"request_clean": request_clean},
+        )
+
+    async def restart_project(self, no_deps: bool, timeout=None, services=None):
+        project = await self._assure_project()
+        specification = {"no_deps": no_deps}
+        if timeout is not None:
+            specification["timeout"] = timeout
+        if services is not None:
+            specification["services"] = services
+
+        return await self.session.post(
+            f"/{project}/restart",
+            json=specification,
+        )
+
+    async def restart_service(self, service, no_deps: bool, timeout=None):
+        project = await self._assure_project()
+        specification = {"no_deps": no_deps}
+        if timeout is not None:
+            specification["timeout"] = timeout
+
+        return await self.session.post(
+            f"/{project}/{service}/restart",
+            json=specification,
+        )
+
+    async def kill_project(self, signal):
+        project = await self._assure_project()
+        self.logger.debug(f"Kill {signal} to /{project}")
+        return await self.session.post(
+            f"/{project}/kill",
+            json={"signal": signal},
+        )
+
+    async def kill_service(self, service, signal):
+        project = await self._assure_project()
+        self.logger.debug(f"Kill {signal} to /{project}/{service}")
+        return await self.session.post(
+            f"/{project}/{service}/kill",
+            json={"signal": signal},
+        )
+
+    def _logs_params(
+        self,
+        follow: bool = False,
+        context: Optional[bool] = None,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
+    ):
+        if context is None:
+            context = not follow
+
+        params = [
+            ("format", "json"),
+            ("context", "on" if context else "no"),
+            ("follow", "on" if follow else "no"),
+        ]
+        if since is not None:
+            params.append(("since", since.isoformat()))
+        if until is not None:
+            params.append(("until", until.isoformat()))
+        if tail is not None:
+            params.append(("tail", f"{tail}"))
+
+        return params
+
+    async def open_service_logs(
+        self,
+        service: str,
+        follow: bool = False,
+        context: Optional[bool] = None,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
+    ):
+        project = await self._assure_project()
+        params = self._logs_params(follow, context, since, until, tail)
+        return self.session.get(
+            f"/{project}/{service}/logs",
+            params=params,
+            timeout=0,
+        )
+
+    async def open_logs(
+        self,
+        services: Optional[List[str]] = None,
+        follow: bool = False,
+        context: Optional[bool] = None,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
+    ):
+        project = await self._assure_project()
+        params = self._logs_params(follow, context, since, until, tail)
+        if services:
+            params += [("service", s) for s in services]
+        return self.session.get(
+            f"/{project}/logs",
+            params=params,
+            timeout=0,
+        )
+
+    async def attach_to_service(self, service: str, context: bool):
+        project = await self._assure_project()
+        return self.session.ws_connect(
+            f"/{project}/{service}/attach",
+            params={"format": "json", "context": "on" if context else "no"},
+            timeout=0,
         )
 
 
