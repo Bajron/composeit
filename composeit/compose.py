@@ -116,6 +116,8 @@ class Compose:
             profiles=self.profiles,
         )
 
+        self.server = ComposeServer(self, self.logger.getChild("server"))
+
     def load_service_config(self, **load_options):
         self._parse_service_config(**load_options)
         self._update_dependencies()
@@ -136,6 +138,9 @@ class Compose:
             for key, service in self.get_services_configs().items()
             if "profile" not in service or service["profile"] in profiles
         ]
+
+    def get_service_ids(self) -> List[str]:
+        return list(self.services.keys())
 
     def _get_next_color(self):
         return self.color_assigner.next() if self.use_colors else None
@@ -184,6 +189,21 @@ class Compose:
         self.depending = depending
         self.depends = depends
 
+    def start_service(self, service: str, request_build: bool = False, no_deps: bool = False):
+        sequence = [service] if no_deps else self.get_start_sequence([service])
+        for s in sequence:
+            if request_build:
+                self.services[s].request_build()
+            # Last one in the sequence should be `service`
+            started = self.services[s].start()
+        return started
+
+    async def stop_service(self, service: str, request_clean: bool = False):
+        for s in self.get_stop_sequence([service]):
+            if request_clean:
+                self.services[s].request_clean()
+            await self.services[s].stop()
+
     def get_start_sequence(self, services: Iterable[str]) -> List[str]:
         assert self.depends is not None
         return topological_sequence(services, self.depends)
@@ -191,6 +211,11 @@ class Compose:
     def get_stop_sequence(self, services: Iterable[str]) -> List[str]:
         assert self.depending is not None
         return topological_sequence(services, self.depending)
+
+    def get_always_restart_services(self):
+        return [
+            name for name, service in self.services.items() if service.restart_policy == "always"
+        ]
 
     async def build(self, services=None):
         return await self.watch_services(
@@ -524,47 +549,12 @@ class Compose:
             "create_time": self.create_time,
         }
 
-    async def get_call(self, request):
-        return web.json_response(self.get_call_json())
-
     def get_project_json(self, profiles: List[str]):
         return {
             "services": list(self.services.keys()),
             "default_services": list(self.get_defaults_services()),
             "profile_services": list(self.get_defaults_services(with_profiles=profiles)),
         }
-
-    def _get_project(self, request: web.Request):
-        project = request.match_info.get("project", "")
-        if project != self.project_name:
-            return web.Response(status=404)
-        return project
-
-    async def post_stop_project(self, request: web.Request):
-        self._get_project(request)
-        body = await self._get_json_or_empty(request)
-        request_clean = body.get("request_clean", False)
-
-        await self.shutdown(request_clean=request_clean)
-        return web.json_response("Stopped")
-
-    def _get_service(self, request: web.Request):
-        service = request.match_info.get("service", "")
-        if service not in self.services.keys():
-            raise web.HTTPNotFound(reason="Service not found")
-        return service
-
-    async def _get_json_or_empty(self, request: web.Request):
-        try:
-            body = await request.json()
-        except JSONDecodeError:
-            body = {}
-        return body
-
-    async def get_project(self, request: web.Request):
-        self._get_project(request)
-        profiles: List[str] = request.query.getall("profile", [])
-        return web.json_response(self.get_project_json(profiles=profiles))
 
     def get_service_json(self, service_name):
         s = self.services[service_name]
@@ -585,193 +575,22 @@ class Compose:
         self.logger.debug(f"{j}")
         return j
 
-    async def get_service(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-        return web.json_response(self.get_service_json(service))
-
-    async def get_service_processes(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-        return web.json_response(self.services[service].get_processes_info())
-
-    async def get_attach(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-
-        response_format = request.query.get("format", "text")
-        add_context: bool = request.query.get("context", "no") == "on"
-        tail: Optional[int] = make_int(request.query.get("tail"))
-
-        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
-        response = web.WebSocketResponse()
-
-        back_stream = WebSocketAdapter(response)
-        await response.prepare(request)
-
-        logs_to_response = logging.StreamHandler(back_stream)
-        if response_format == "json":
-            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
-
-        if add_context:
-            self.services[service].feed_handler(logs_to_response, tail=tail)
-
-        self.services[service].attach_log_handlers(logs_to_response, logs_to_response)
-
-        def detach_logger(fut):
-            self.logger.debug(f"Detaching log sender from {service}")
-            self.services[service].detach_log_handlers(logs_to_response, logs_to_response)
-
-        assert response.task is not None
-        response.task.add_done_callback(detach_logger)
-
-        try:
-            while not response.closed and not self.services[service].terminated_and_done:
-                try:
-                    line = await response.receive_str()
-
-                    process = self.services[service].process
-                    if process is None or process.stdin is None:
-                        self.logger.warning("Cannot forward the input to the process")
-                        continue
-                    process.stdin.write(line.encode())
-                except TypeError:
-                    break
-        finally:
-            self.logger.debug("Closing attach request")
-            try:
-                await response.close()
-            except ConnectionResetError:
-                self.logger.debug("Attach connection broken")
-
-        return response
-
-    async def get_service_logs(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-
-        await self._provide_logs_response(request, [service])
-
-    async def get_services_logs(self, request: web.Request):
-        self._get_project(request)
-        services: Optional[List[str]] = request.query.getall("service", None)
-        if services is None:
-            services = list(self.services.keys())
-
-        await self._provide_logs_response(request, services)
-
-    async def _provide_logs_response(self, request: web.Request, services: List[str]):
-        response_format: str = request.query.get("format", "text")
-        add_context: bool = request.query.get("context", "no") == "on"
-        follow: bool = request.query.get("follow", "no") == "on"
-
-        since: Optional[datetime.datetime] = make_date(request.query.get("since"))
-        until: Optional[datetime.datetime] = make_date(request.query.get("until"))
-        tail: Optional[int] = make_int(request.query.get("tail"))
-
-        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
-        response = web.StreamResponse()
-        response.enable_chunked_encoding()
-
-        back_stream = ResponseAdapter(response)
-        logs_to_response = logging.StreamHandler(back_stream)
-        if response_format == "json":
-            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
-
-        await response.prepare(request)
-
-        now = datetime.datetime.now()
-
-        if (
-            add_context
-            or since is not None
-            or (until is not None and until < now)
-            or tail is not None
-        ):
-            self.logger.debug(f"Providing log context since={since}, until={until}, tail={tail}")
-            log_context = list(
-                r
-                for s in services
-                for r in self.services[s].get_log_context(since=since, until=until, tail=tail)
-            )
-            log_context.sort(key=lambda x: x.created)
-            for r in log_context:
-                logs_to_response.emit(r)
-
-        if follow or until is not None and until > now:
-            for s in services:
-                self.services[s].attach_log_handlers(logs_to_response, logs_to_response)
-
-            def detach_loggers(fut):
-                for s in services:
-                    self.logger.debug(f"Detaching log sender from {s}")
-                    self.services[s].detach_log_handlers(logs_to_response, logs_to_response)
-
-            assert response.task is not None
-            response.task.add_done_callback(detach_loggers)
-
-        # Yield for context messages processing
-        await asyncio.sleep(0)
-
-        try:
-            # TODO: cleaner solution? websocket here?
-            while (
-                (follow or (until is not None and datetime.datetime.now() < until))
-                and not await back_stream.is_broken()
-                and not all([self.services[s].terminated_and_done for s in services])
-            ):
-                await asyncio.sleep(1)
-                if until is not None and datetime.datetime.now() > until:
-                    break
-        finally:
-            self.logger.debug("Closing log request")
-            try:
-                await response.write_eof()
-            except ConnectionResetError:
-                self.logger.debug("Log connection broken")
-
-        return response
-
-    async def post_stop_service(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-        body = await self._get_json_or_empty(request)
-        request_clean = body.get("request_clean", False)
-        for s in self.get_stop_sequence([service]):
-            if request_clean:
-                self.services[s].request_clean()
-            await self.services[s].stop()
-        return web.json_response("Stopped")
-
-    async def post_restart_project(self, request: web.Request):
-        self._get_project(request)
-        body = await self._get_json_or_empty(request)
-        services = body.get("services")
+    async def restart_services(
+        self,
+        services: Optional[List[str]] = None,
+        no_deps: bool = False,
+        timeout: Optional[float] = None,
+    ):
         if services is None:
             started: Set[str] = {
                 name for name, s in self.services.items() if not (s.stopped or s.terminated)
             }
-            services = set(self.services.keys()).union(started)
+            services = list(set(self.services.keys()).union(started))
 
-        sequence = services if body.get("no_deps", False) else self.get_stop_sequence(services)
-        timeout = body.get("timeout", None)
+        sequence = services if no_deps else self.get_stop_sequence(services)
+        await self.restart_in_sequence(sequence, timeout)
 
-        await self._restart_in_sequence(sequence, timeout)
-
-        return web.json_response("Restarted")
-
-    async def post_restart_service(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-        body = await self._get_json_or_empty(request)
-        sequence = [service] if body.get("no_deps", False) else self.get_stop_sequence([service])
-        timeout = body.get("timeout", None)
-
-        await self._restart_in_sequence(sequence, timeout)
-
-        return web.json_response("Restarted")
-
-    async def _restart_in_sequence(self, sequence, timeout=None):
+    async def restart_in_sequence(self, sequence: List[str], timeout: Optional[float] = None):
         for s in sequence:
             try:
                 # NOTE: shielded, because we want this stop to run, so the second one is force stop
@@ -782,73 +601,6 @@ class Compose:
 
         for s in reversed(sequence):
             self.services[s].start()
-
-    async def post_kill_service(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-        body = await self._get_json_or_empty(request)
-        s = get_signal(body.get("signal", get_default_kill()))
-        try:
-            await self.services[service].kill(s)
-            return web.json_response("Killed")
-        except ValueError as ex:
-            self.logger.warning(f"ValueError: {ex}")
-            return web.json_response(f"ValueError", status=400)
-        except ProcessLookupError as ex:
-            self.logger.warning(f"ProcessLookupError: {ex}")
-            return web.json_response(f"ProcessLookupError", status=400)
-
-    async def post_kill_project(self, request: web.Request):
-        self._get_project(request)
-        body = await self._get_json_or_empty(request)
-        s = get_signal(body.get("signal", get_default_kill()))
-        try:
-            await asyncio.gather(*[service.kill(s) for service in self.services.values()])
-            return web.json_response("Killed")
-        except ValueError as ex:
-            self.logger.warning(f"ValueError: {ex}")
-            return web.json_response(f"ValueError", status=400)
-        except ProcessLookupError as ex:
-            self.logger.warning(f"ProcessLookupError: {ex}")
-            return web.json_response(f"ProcessLookupError", status=400)
-
-    async def post_start_service(self, request: web.Request):
-        self._get_project(request)
-        service = self._get_service(request)
-        body = await self._get_json_or_empty(request)
-        request_build = body.get("request_build", False)
-        sequence = [service] if body.get("no_deps", False) else self.get_start_sequence([service])
-        for s in sequence:
-            if request_build:
-                self.services[s].request_build()
-            # Last one in the sequence should be `service`
-            message = "Started" if self.services[s].start() else "Running"
-        return web.json_response(message)
-
-    def start_server(self):
-        self.app = web.Application()
-        self.app.add_routes(
-            [
-                web.get("/", self.get_call),
-                web.get("/{project}", self.get_project),
-                web.post("/{project}/stop", self.post_stop_project),
-                web.get("/{project}/logs", self.get_services_logs),
-                web.get("/{project}/{service}", self.get_service),
-                web.get("/{project}/{service}/attach", self.get_attach),
-                web.get("/{project}/{service}/logs", self.get_service_logs),
-                web.post("/{project}/{service}/stop", self.post_stop_service),
-                web.post("/{project}/{service}/start", self.post_start_service),
-                web.get("/{project}/{service}/top", self.get_service_processes),
-                web.post("/{project}/{service}/kill", self.post_kill_service),
-                web.post("/{project}/kill", self.post_kill_project),
-                web.post("/{project}/{service}/restart", self.post_restart_service),
-                web.post("/{project}/restart", self.post_restart_project),
-            ]
-        )
-
-        return asyncio.get_event_loop().create_task(
-            run_server(self.app, self.logger.getChild("http"), self.communication_pipe)
-        )
 
     async def shutdown(self, request_clean=False, retry_on_timeout=True):
         try:
@@ -927,7 +679,7 @@ class Compose:
             server_task: Optional[asyncio.Task] = None
             if start_server:
                 self.logger.debug("Starting server")
-                server_task = self.start_server()
+                server_task = self.server.start_server()
 
             service_log_handler = logging.StreamHandler(stream=sys.stderr)
             service_log_handler.setFormatter(logging.Formatter(" **%(name)s* %(message)s"))
@@ -1009,11 +761,6 @@ class Compose:
             return self.services[code_from].rc
         else:
             return 0
-
-    def get_always_restart_services(self):
-        return [
-            name for name, service in self.services.items() if service.restart_policy == "always"
-        ]
 
 
 class ComposeProxy:
@@ -1459,6 +1206,298 @@ class ComposeProxy:
             session=session,
             project_name=self.project_name,
             profiles=self.profiles,
+        )
+
+
+class ComposeServer:
+    def __init__(self, compose: Compose, logger: logging.Logger) -> None:
+        self.compose = compose
+        self.project_name = compose.project_name
+        self.connection_path = compose.communication_pipe
+        self.logger = logger
+
+    def _get_project(self, request: web.Request):
+        project = request.match_info.get("project", "")
+        if project != self.project_name:
+            return web.Response(status=404)
+        return project
+
+    def _get_service(self, request: web.Request):
+        service = request.match_info.get("service", "")
+        if service not in self.compose.get_service_ids():
+            raise web.HTTPNotFound(reason="Service not found")
+        return service
+
+    async def _get_json_or_empty(self, request: web.Request):
+        try:
+            body = await request.json()
+        except JSONDecodeError:
+            body = {}
+        return body
+
+    async def get_call(self, request):
+        return web.json_response(self.compose.get_call_json())
+
+    async def get_project(self, request: web.Request):
+        self._get_project(request)
+        profiles: List[str] = request.query.getall("profile", [])
+        return web.json_response(self.compose.get_project_json(profiles=profiles))
+
+    async def get_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        return web.json_response(self.compose.get_service_json(service))
+
+    async def get_service_processes(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        return web.json_response(self.compose.services[service].get_processes_info())
+
+    async def post_stop_project(self, request: web.Request):
+        self._get_project(request)
+        body = await self._get_json_or_empty(request)
+        request_clean = body.get("request_clean", False)
+
+        await self.compose.shutdown(request_clean=request_clean)
+        return web.json_response("Stopped")
+
+    async def post_kill_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        body = await self._get_json_or_empty(request)
+        s = get_signal(body.get("signal", get_default_kill()))
+        try:
+            await self.compose.services[service].kill(s)
+            return web.json_response("Killed")
+        except ValueError as ex:
+            self.logger.warning(f"ValueError: {ex}")
+            return web.json_response(f"ValueError", status=400)
+        except ProcessLookupError as ex:
+            self.logger.warning(f"ProcessLookupError: {ex}")
+            return web.json_response(f"ProcessLookupError", status=400)
+
+    async def post_kill_project(self, request: web.Request):
+        self._get_project(request)
+        body = await self._get_json_or_empty(request)
+        s = get_signal(body.get("signal", get_default_kill()))
+        try:
+            await asyncio.gather(*[service.kill(s) for service in self.compose.services.values()])
+            return web.json_response("Killed")
+        except ValueError as ex:
+            self.logger.warning(f"ValueError: {ex}")
+            return web.json_response(f"ValueError", status=400)
+        except ProcessLookupError as ex:
+            self.logger.warning(f"ProcessLookupError: {ex}")
+            return web.json_response(f"ProcessLookupError", status=400)
+
+    async def post_start_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        body = await self._get_json_or_empty(request)
+        request_build = body.get("request_build", False)
+
+        started = self.compose.start_service(
+            service, request_build, no_deps=body.get("no_deps", False)
+        )
+        message = "Started" if started else "Running"
+
+        return web.json_response(message)
+
+    async def get_attach(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+
+        response_format = request.query.get("format", "text")
+        add_context: bool = request.query.get("context", "no") == "on"
+        tail: Optional[int] = make_int(request.query.get("tail"))
+
+        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
+        response = web.WebSocketResponse()
+
+        back_stream = WebSocketAdapter(response)
+        await response.prepare(request)
+
+        logs_to_response = logging.StreamHandler(back_stream)
+        if response_format == "json":
+            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
+
+        services = self.compose.services
+
+        if add_context:
+            services[service].feed_handler(logs_to_response, tail=tail)
+
+        services[service].attach_log_handlers(logs_to_response, logs_to_response)
+
+        def detach_logger(fut):
+            self.logger.debug(f"Detaching log sender from {service}")
+            services[service].detach_log_handlers(logs_to_response, logs_to_response)
+
+        assert response.task is not None
+        response.task.add_done_callback(detach_logger)
+
+        try:
+            while not response.closed and not services[service].terminated_and_done:
+                try:
+                    line = await response.receive_str()
+
+                    process = services[service].process
+                    if process is None or process.stdin is None:
+                        self.logger.warning("Cannot forward the input to the process")
+                        continue
+                    process.stdin.write(line.encode())
+                except TypeError:
+                    break
+        finally:
+            self.logger.debug("Closing attach request")
+            try:
+                await response.close()
+            except ConnectionResetError:
+                self.logger.debug("Attach connection broken")
+
+        return response
+
+    async def get_service_logs(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+
+        await self._provide_logs_response(request, [service])
+
+    async def get_services_logs(self, request: web.Request):
+        self._get_project(request)
+        services: Optional[List[str]] = request.query.getall("service", None)
+        if services is None:
+            services = self.compose.get_service_ids()
+
+        await self._provide_logs_response(request, services)
+
+    async def _provide_logs_response(self, request: web.Request, service_names: List[str]):
+        response_format: str = request.query.get("format", "text")
+        add_context: bool = request.query.get("context", "no") == "on"
+        follow: bool = request.query.get("follow", "no") == "on"
+
+        since: Optional[datetime.datetime] = make_date(request.query.get("since"))
+        until: Optional[datetime.datetime] = make_date(request.query.get("until"))
+        tail: Optional[int] = make_int(request.query.get("tail"))
+
+        # https://docs.aiohttp.org/en/stable/web_lowlevel.html
+        response = web.StreamResponse()
+        response.enable_chunked_encoding()
+
+        back_stream = ResponseAdapter(response)
+        logs_to_response = logging.StreamHandler(back_stream)
+        if response_format == "json":
+            logs_to_response.setFormatter(JsonFormatter("%(message)s"))
+
+        await response.prepare(request)
+
+        now = datetime.datetime.now()
+        services = self.compose.services
+
+        if (
+            add_context
+            or since is not None
+            or (until is not None and until < now)
+            or tail is not None
+        ):
+            self.logger.debug(f"Providing log context since={since}, until={until}, tail={tail}")
+            log_context = list(
+                r
+                for s in service_names
+                for r in services[s].get_log_context(since=since, until=until, tail=tail)
+            )
+            log_context.sort(key=lambda x: x.created)
+            for r in log_context:
+                logs_to_response.emit(r)
+
+        if follow or until is not None and until > now:
+            for s in service_names:
+                services[s].attach_log_handlers(logs_to_response, logs_to_response)
+
+            def detach_loggers(fut):
+                for s in service_names:
+                    self.logger.debug(f"Detaching log sender from {s}")
+                    services[s].detach_log_handlers(logs_to_response, logs_to_response)
+
+            assert response.task is not None
+            response.task.add_done_callback(detach_loggers)
+
+        # Yield for context messages processing
+        await asyncio.sleep(0)
+
+        try:
+            # TODO: cleaner solution? websocket here?
+            while (
+                (follow or (until is not None and datetime.datetime.now() < until))
+                and not await back_stream.is_broken()
+                and not all([services[s].terminated_and_done for s in service_names])
+            ):
+                await asyncio.sleep(1)
+                if until is not None and datetime.datetime.now() > until:
+                    break
+        finally:
+            self.logger.debug("Closing log request")
+            try:
+                await response.write_eof()
+            except ConnectionResetError:
+                self.logger.debug("Log connection broken")
+
+        return response
+
+    async def post_stop_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        body = await self._get_json_or_empty(request)
+        request_clean = body.get("request_clean", False)
+
+        await self.compose.stop_service(service, request_clean)
+
+        return web.json_response("Stopped")
+
+    async def post_restart_project(self, request: web.Request):
+        self._get_project(request)
+        body = await self._get_json_or_empty(request)
+        services = body.get("services")
+
+        await self.compose.restart_services(
+            services, no_deps=body.get("no_deps", False), timeout=body.get("timeout", None)
+        )
+
+        return web.json_response("Restarted")
+
+    async def post_restart_service(self, request: web.Request):
+        self._get_project(request)
+        service = self._get_service(request)
+        body = await self._get_json_or_empty(request)
+
+        await self.compose.restart_services(
+            [service], no_deps=body.get("no_deps", False), timeout=body.get("timeout", None)
+        )
+
+        return web.json_response("Restarted")
+
+    def start_server(self):
+        self.app = web.Application()
+        self.app.add_routes(
+            [
+                web.get("/", self.get_call),
+                web.get("/{project}", self.get_project),
+                web.post("/{project}/stop", self.post_stop_project),
+                web.get("/{project}/logs", self.get_services_logs),
+                web.get("/{project}/{service}", self.get_service),
+                web.get("/{project}/{service}/attach", self.get_attach),
+                web.get("/{project}/{service}/logs", self.get_service_logs),
+                web.post("/{project}/{service}/stop", self.post_stop_service),
+                web.post("/{project}/{service}/start", self.post_start_service),
+                web.get("/{project}/{service}/top", self.get_service_processes),
+                web.post("/{project}/{service}/kill", self.post_kill_service),
+                web.post("/{project}/kill", self.post_kill_project),
+                web.post("/{project}/{service}/restart", self.post_restart_service),
+                web.post("/{project}/restart", self.post_restart_project),
+            ]
+        )
+
+        return asyncio.get_event_loop().create_task(
+            run_server(self.app, self.logger.getChild("http"), self.connection_path)
         )
 
 
