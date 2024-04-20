@@ -14,7 +14,8 @@ from aiohttp import web, ClientConnectorError, ClientResponseError
 from json.decoder import JSONDecodeError
 from .service_config import get_signal, get_default_kill, merge_configs
 from .log_utils import ComposeFormatter, build_format
-from typing import List, Dict, Optional, Iterable, Mapping, Set
+from .client import ComposeClient
+from typing import List, Dict, Optional, Iterable, Mapping, Set, Callable
 
 from .log_utils import (
     JsonFormatter,
@@ -106,6 +107,14 @@ class Compose:
 
         self.services: Dict[str, AsyncProcess] = {}
         self.app: Optional[Application] = None
+
+        self.proxy = ComposeProxy(
+            self.logger.getChild("proxy"),
+            self.verbose,
+            self.communication_pipe,
+            project_name=self.project_name,
+            profiles=self.profiles,
+        )
 
     def load_service_config(self, **load_options):
         self._parse_service_config(**load_options)
@@ -206,11 +215,9 @@ class Compose:
         timestamps=False,
         no_server=False,
     ):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
-            return await self.run_client_session(
-                self.make_start_session(services, execute_build, no_deps)
-            )
+            return await self.proxy.start(services, execute_build, no_deps)
         else:
             return await self.watch_services(
                 services=services,
@@ -227,35 +234,8 @@ class Compose:
                 timestamps=timestamps,
             )
 
-    def make_start_session(self, services=None, request_build=False, no_deps=False):
-        async def run_client_commands(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            existing_services = await remote.get_services()
-
-            if services is not None:
-                to_request = []
-                for service in services:
-                    if service not in existing_services:
-                        self.logger.warning(f"{service} does not exist on the server, skipping")
-                        continue
-                    to_request.append(service)
-            else:
-                to_request = await remote.get_default_services()
-
-            bad_responses = 0
-            for service in to_request:
-                response = await remote.start_service(service, request_build, no_deps)
-                if response.status == 200:
-                    print(service, await response.json())
-                else:
-                    bad_responses += 1
-
-            return 0 if bad_responses == 0 else 1
-
-        return run_client_commands
-
     async def down(self, services=None, timeout=None):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
             return await self.stop(
                 services=services, request_clean=True, server_up=server_up, timeout=timeout
@@ -267,248 +247,64 @@ class Compose:
 
     async def stop(self, services=None, request_clean=False, server_up=None, timeout=None):
         if server_up is None:
-            server_up = await self.check_server_is_running()
-
+            server_up = await self.proxy.check_server_is_running()
         if server_up:
-            return await self.run_client_session(
-                self.make_stop_session(services, request_clean, timeout)
-            )
+            return await self.proxy.stop(services, request_clean, timeout)
         else:
             self.logger.error("Server is not running")
             return 1
-
-    def make_stop_session(self, services=None, request_clean=False, timeout=None):
-        async def run_client_commands(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            project = await remote.get_project()
-            existing_services = await remote.get_services()
-
-            if services is not None:
-                for service in services:
-                    if service not in existing_services:
-                        self.logger.warning(f"{service} does not exist on the server, skipping")
-                        continue
-
-                    self.logger.debug(f"Stopping /{project}/{service}")
-                    request = lambda: remote.stop_service(service, request_clean=request_clean)
-
-                    try:
-                        response = await asyncio.wait_for(
-                            request(),
-                            timeout=timeout,
-                        )
-                    except asyncio.exceptions.TimeoutError:
-                        self.logger.warning(f"Stopping {service} timed out after {timeout}")
-                        response = await request()
-
-                    if response.status == 200:
-                        print(service, await response.json())
-            else:
-                request = lambda: remote.stop_project(request_clean=request_clean)
-
-                try:
-                    response = await asyncio.wait_for(request(), timeout=timeout)
-                except asyncio.exceptions.TimeoutError:
-                    self.logger.warning(f"Stopping {project} timed out after {timeout}")
-                    response = await request()
-
-                if response.status == 200:
-                    print(project, await response.json())
-
-            return 0 if 200 <= response.status < 300 else 1
-
-        return run_client_commands
 
     async def restart(self, services=None, **kwargs):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
-            return await self.run_client_session(self.make_restart_session(services, **kwargs))
+            return await self.proxy.restart(services, **kwargs)
         else:
             self.logger.error("Server is not running")
             return 1
-
-    def make_restart_session(self, services=None, no_deps=False, timeout=None):
-        async def run_client_commands(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            project = await remote.get_project()
-            if services is not None and len(services) == 1:
-                response = await remote.restart_service(
-                    services[0], no_deps=no_deps, timeout=timeout
-                )
-                if response.status == 200:
-                    print(services[0], await response.json())
-            else:
-                response = await remote.restart_project(
-                    no_deps=no_deps, timeout=timeout, services=services
-                )
-                if response.status == 200:
-                    print(project, await response.json())
-
-            return 0 if 200 <= response.status < 300 else 1
-
-        return run_client_commands
 
     async def kill(self, services=None, signal=9):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
-            return await self.run_client_session(self.make_kill_session(services, signal))
+            return await self.proxy.kill(services, signal)
         else:
             self.logger.error("Server is not running")
             return 1
-
-    def make_kill_session(self, services=None, signal=9):
-        async def run_client_commands(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            project = await remote.get_project()
-            existing_services = await remote.get_services()
-
-            if services is not None:
-                for service in services:
-                    if service not in existing_services:
-                        self.logger.warning(f"{service} does not exist on the server, skipping")
-                        continue
-                    response = await remote.kill_service(service, signal)
-                    print(service, await response.json())
-            else:
-                response = await remote.kill_project(signal)
-                print(project, await response.json())
-
-            return 0 if 200 <= response.status < 300 else 1
-
-        return run_client_commands
 
     async def logs(
         self,
         services: Optional[List[str]] = None,
-        **kwargs,
-    ):
-        server_up = await self.check_server_is_running()
-
-        if server_up:
-            return await self.run_client_session(self.make_logs_session(services, **kwargs))
-        else:
-            self.logger.error("Server is not running")
-            return 1
-
-    def make_logs_session(
-        self,
-        services: Optional[List[str]] = None,
-        follow: bool = False,
-        context: Optional[bool] = None,
-        since: Optional[datetime.datetime] = None,
-        until: Optional[datetime.datetime] = None,
-        tail: Optional[int] = None,
         color: Optional[bool] = None,
         timestamps: Optional[bool] = None,
         prefix: Optional[bool] = None,
+        **kwargs,
     ):
-        async def stream_logs_response(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-
-            async def logs_request():
-                common_args = dict(
-                    follow=follow, context=context, since=since, until=until, tail=tail
-                )
-                if services is not None and len(services) == 1:
-                    return await remote.open_service_logs(services[0], **common_args)
-                else:
-                    return await remote.open_logs(services=services, **common_args)
-
-            async with await logs_request() as response:
-                close_requested = False
-
-                def signal_handler(signal, frame):
-                    nonlocal close_requested
-                    close_requested = True
-                    asyncio.get_event_loop().call_soon_threadsafe(response.close)
-
-                signal.signal(signal.SIGINT, signal_handler)
-
-                single_service_provided = services is not None and len(services) == 1
-                print_function = build_print_function(
-                    single_service_provided,
-                    None if color is None else (self.use_colors and color),
-                    prefix,
-                    timestamps,
-                )
-
-                try:
-                    self.logger.debug("Reading logs")
-                    async for line in response.content:
-                        fields = json.loads(line.decode())
-                        if not self.verbose and fields["levelno"] == logging.DEBUG:
-                            continue
-                        print_function(fields)
-                    return 0
-                except asyncio.CancelledError:
-                    self.logger.debug("Request cancelled")
-                    return 1
-                except aiohttp.ClientConnectionError as ex:
-                    if not close_requested:
-                        self.logger.warning("Connection error {ex}")
-                        return 2
-            return 0
-
-        return stream_logs_response
-
-    async def attach(self, service: str, context: bool = False):
-        server_up = await self.check_server_is_running()
-
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
-            return await self.run_client_session(self.make_attach_session(service, context))
+            single_service_provided = services is not None and len(services) == 1
+            print_function = build_print_function(
+                single_service_provided,
+                None if color is None else (self.use_colors and color),
+                prefix,
+                timestamps,
+            )
+            return await self.proxy.logs(services, print_function=print_function, **kwargs)
         else:
             self.logger.error("Server is not running")
             return 1
 
-    def make_attach_session(self, service: str, context: bool = False):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            async with await remote.attach_to_service(service, context) as ws:
-                exit_requested = False
-
-                def signal_handler(signal, frame):
-                    nonlocal exit_requested
-                    exit_requested = True
-                    asyncio.get_event_loop().create_task(ws.close())
-
-                signal.signal(signal.SIGINT, signal_handler)
-
-                async def print_ws_strings():
-                    while not ws.closed:
-                        try:
-                            line = await ws.receive_str()
-                            fields = json.loads(line)
-                            if not self.verbose and fields["levelno"] == logging.DEBUG:
-                                continue
-                            print_message(fields)
-                        except TypeError:
-                            if not exit_requested:
-                                self.logger.warning("Connection broken")
-                            # TODO: how to break the sys.stdin.readline?
-                            #       cannot really make it asyncio on Windows...
-                            #       https://stackoverflow.com/questions/31510190/aysncio-cannot-read-stdin-on-windows
-                            break
-
-                loop = asyncio.get_running_loop()
-                loop.create_task(print_ws_strings())
-
-                try:
-                    while not ws.closed:
-                        input_line = await loop.run_in_executor(None, sys.stdin.readline)
-                        if not ws.closed:
-                            await ws.send_str(input_line)
-                    return 0
-                except asyncio.CancelledError:
-                    self.logger.debug("Attach cancelled")
-                    return 1
-
-        return client_session
+    async def attach(self, service: str, context: bool = False):
+        server_up = await self.proxy.check_server_is_running()
+        if server_up:
+            return await self.proxy.attach(service, context)
+        else:
+            self.logger.error("Server is not running")
+            return 1
 
     async def images(self, services: Optional[List[str]] = None):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_images_session(services))
+            directory, name, services_info = await self.proxy.images(services)
         else:
             self.logger.warning("Server is not running")
             self.assure_service_config()
@@ -521,24 +317,9 @@ class Compose:
                 }
                 for i, (name, s) in enumerate(self.get_services_configs().items())
             ]
-            self.show_images(self.working_directory, self.project_name, services_info)
+            directory, name = self.working_directory, self.project_name
 
-    def make_images_session(self, services: Optional[List[str]] = None):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            directory_data = await remote.get_directory_data()
-            project = directory_data["project_name"]
-            working_directory = directory_data["working_directory"]
-
-            nonlocal services
-            if services is None:
-                services = await remote.get_services()
-
-            service_data = await remote.get_services_data(services)
-
-            self.show_images(working_directory, project, service_data)
-
-        return client_session
+        self.show_images(directory, name, services_info)
 
     def show_images(self, working_directory, project, service_data):
         service_data.sort(key=lambda x: x["sequence"])
@@ -558,10 +339,10 @@ class Compose:
             print(fmt.format(**row))
 
     async def ps(self, services: Optional[List[str]] = None, **kwargs):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
 
         if server_up:
-            await self.run_client_session(self.make_ps_session(services, **kwargs))
+            name, directory, services_info = await self.proxy.ps(services)
         else:
             self.logger.warning("Server is not running")
             self.assure_service_config()
@@ -570,27 +351,16 @@ class Compose:
                 {"name": name, "command": get_command(s, self.logger), "state": "-", "sequence": i}
                 for i, (name, s) in enumerate(self.get_services_configs().items())
             ]
-            self.show_service_status(
-                self.working_directory, self.project_name, services_info, **kwargs
-            )
+            name, directory = self.project_name, self.working_directory
 
-    def make_ps_session(self, services: Optional[List[str]] = None, **kwargs):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            directory_data = await remote.get_directory_data()
-            project = directory_data["project_name"]
-            working_directory = directory_data["working_directory"]
+        self.print_ps(
+            directory,
+            name,
+            services_info,
+            **kwargs,
+        )
 
-            nonlocal services
-            if services is None:
-                services = await remote.get_services()
-
-            service_data = await remote.get_services_data(services)
-            self.show_service_status(working_directory, project, service_data, **kwargs)
-
-        return client_session
-
-    def show_service_status(
+    def print_ps(
         self,
         working_directory,
         project,
@@ -678,159 +448,73 @@ class Compose:
             print(fmt.format(**row))
 
     async def top(self, services: Optional[List[str]] = None):
-        server_up = await self.check_server_is_running()
-
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
-            await self.run_client_session(self.make_top_session(services))
+            name, directory, processes = await self.proxy.top(services)
         else:
-            self.logger.error("Server is not running")
+            self.logger.warning("Server is not running")
+            name, directory, processes = self.project_name, self.working_directory, []
 
-    def make_top_session(self, services: Optional[List[str]] = None):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            directory_data = await remote.get_directory_data()
-            project = directory_data["project_name"]
-            working_directory = directory_data["working_directory"]
+        self.print_top(name, directory, processes)
 
-            nonlocal services
-            if services is None:
-                services = await remote.get_services()
+    def print_top(self, project, working_directory, processes):
+        header = [
+            ("uid", "UID", 16),
+            ("pid", "PID", 6),
+            ("ppid", "PPID", 6),
+            ("c", "C", 5),
+            ("stime", "STIME", 10),
+            ("tty", "TTY", 6),
+            ("time", "TIME", 10),
+            ("cmd", "CMD", 20),
+        ]
+        fmt = ""
+        for n, _, w in header:
+            fmt += f"{{{n}:{w}}} "
+        self.logger.debug(f"Format is '{fmt}'")
 
-            processes = await remote.get_services_top(services)
+        def make_row(p: dict):
+            row = {}
+            row["uid"] = p["username"]
+            row["pid"] = p["pid"]
+            row["ppid"] = p["ppid"]
+            row["c"] = p["cpu_percent"]
+            row["stime"] = date_time_text(p["create_time"])
+            row["tty"] = p["terminal"]
+            row["time"] = cumulative_time_text(p["cpu_times"]["user"])
+            row["cmd"] = " ".join(p["cmdline"])
+            return {k: v or "-" for k, v in row.items()}
 
-            header = [
-                ("uid", "UID", 16),
-                ("pid", "PID", 6),
-                ("ppid", "PPID", 6),
-                ("c", "C", 5),
-                ("stime", "STIME", 10),
-                ("tty", "TTY", 6),
-                ("time", "TIME", 10),
-                ("cmd", "CMD", 20),
-            ]
-            fmt = ""
-            for n, _, w in header:
-                fmt += f"{{{n}:{w}}} "
-            self.logger.debug(f"Format is '{fmt}'")
+        info_rows = []
+        for process_info in processes:
+            info_rows.append(make_row(process_info))
 
-            def make_row(p: dict):
-                row = {}
-                row["uid"] = p["username"]
-                row["pid"] = p["pid"]
-                row["ppid"] = p["ppid"]
-                row["c"] = p["cpu_percent"]
-                row["stime"] = date_time_text(p["create_time"])
-                row["tty"] = p["terminal"]
-                row["time"] = cumulative_time_text(p["cpu_times"]["user"])
-                row["cmd"] = " ".join(p["cmdline"])
-                return {k: v or "-" for k, v in row.items()}
+        print(f"Project: {project}, in {working_directory}")
+        print(fmt.format(**{k: v for k, v, _ in header}))
+        for row in info_rows:
+            print(fmt.format(**row))
 
-            info_rows = []
-            for process_info in processes:
-                info_rows.append(make_row(process_info))
-
-            print(f"Project: {project}, in {working_directory}")
-            print(fmt.format(**{k: v for k, v, _ in header}))
-            for row in info_rows:
-                print(fmt.format(**row))
-
-        return client_session
+    async def server_info(self, wait: bool = False, wait_timeout: Optional[float] = None):
+        code, info = await self.proxy.server_info(wait, wait_timeout)
+        if code == 0:
+            print(info)
+        elif code == 1:
+            print("Server is not running")
 
     async def wait_for_up(self, services=None):
-        server_up = False
-        while not server_up:
-            server_up = await self.check_server_is_running()
-
-        return await self.run_client_session(self.make_wait_for_up_session(services))
-
-    def make_wait_for_up_session(self, services: Optional[List[str]] = None):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            await remote.get_project()
-
-            nonlocal services
-            if services is None:
-                services = await remote.get_default_services()
-
-            all_services_up = False
-            while not all_services_up:
-                service_data = await remote.get_services_data(services)
-                all_services_up = all([s["state"] == "started" for s in service_data])
-
-        return client_session
+        await self.proxy.wait_for_server()
+        return await self.proxy.wait_for_up(services)
 
     async def wait(self, services=None, down_project=False):
-        server_up = await self.check_server_is_running()
+        server_up = await self.proxy.check_server_is_running()
         if server_up:
-            return await self.run_client_session(self.make_wait_session(services, down_project))
-        else:
-            self.logger.error("Server is not running")
-            return 1
-
-    def make_wait_session(self, services: Optional[List[str]] = None, down_project=False):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-            await remote.get_project()
-
-            nonlocal services
-            if services is None:
-                services = await remote.get_default_services()
-
-            any_service_down = False
-            while not any_service_down:
-                service_data = await remote.get_services_data(services)
-                any_service_down = any([s["state"] == "stopped" for s in service_data])
-
+            any_service_down = await self.proxy.wait(services)
             if any_service_down and down_project:
                 self.logger.info("Shutting down after a service went down")
                 await self.down()
-
-            return 0
-
-        return client_session
-
-    async def server_info(self, wait: bool = False, wait_timeout: Optional[float] = None):
-        return await self.run_client_session(self.make_server_info_session(wait, wait_timeout))
-
-    def make_server_info_session(self, wait: bool, wait_timeout: Optional[float]):
-        async def client_session(session: aiohttp.ClientSession):
-            remote = self.make_proxy(session)
-
-            sleep_time = 0.05
-            end = time.time() + wait_timeout if wait_timeout is not None else None
-            interrupted = False
-
-            def signal_handler(signal, frame):
-                nonlocal end, interrupted
-                end = time.time()
-                interrupted = True
-
-            signal.signal(signal.SIGINT, signal_handler)
-
-            while end is None or time.time() < end:
-                try:
-                    directory = await remote.get_directory_data()
-                    print(directory)
-                    return 0
-                except:
-                    pass
-
-                if not wait or interrupted:
-                    break
-
-                # Last try will most likely not happen
-                if end is not None:
-                    sleep_time = min(max(0, end - time.time()), sleep_time)
-                time.sleep(sleep_time)
-                sleep_time = min(2 * sleep_time, 1)
-
-            if interrupted:
-                return 2
-
-            print("Server is not running")
+        else:
+            self.logger.error("Server is not running")
             return 1
-
-        return client_session
 
     def get_call_json(self):
         return {
@@ -1331,40 +1015,364 @@ class Compose:
             name for name, service in self.services.items() if service.restart_policy == "always"
         ]
 
-    async def run_client_session(self, session_function):
-        try:
-            return await self.execute_client_session(session_function)
-        except ClientConnectorError as ex:
-            self.logger.error(f"Connection error for {self.communication_pipe}: {ex}")
-        except FileNotFoundError as ex:
-            self.logger.error(f"Name error for {self.communication_pipe}: {ex}")
-        except ClientResponseError as ex:
-            self.logger.error(f"Error response: {ex}")
-        return 3
 
-    async def execute_with_connector(self, connector_function, **kwargs):
-        self.logger.debug(f"Connect: {self.communication_pipe}")
-        if os.name == "nt":
-            async with aiohttp.NamedPipeConnector(
-                path=self.communication_pipe, **kwargs
-            ) as connector:
-                return await connector_function(connector)
-        else:
-            async with aiohttp.UnixConnector(path=self.communication_pipe, **kwargs) as connector:
-                return await connector_function(connector)
+class ComposeProxy:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        verbose: bool,
+        connection_path: str,
+        project_name: Optional[str] = None,
+        profiles: List[str] = [],
+    ) -> None:
 
-    async def execute_client_session(self, session_function, connector_options=None):
-        async def with_connector(connector):
-            hostname = gethostname()
-            async with aiohttp.ClientSession(
-                base_url=f"http://{hostname}",
-                connector=connector,
-                raise_for_status=True,
-                timeout=aiohttp.ClientTimeout(sock_connect=10, connect=10),
-            ) as session:
-                return await session_function(session)
+        self.connection_path: str = connection_path
+        self.logger: logging.Logger = logger
+        self.verbose: bool = verbose
+        self.project_name: Optional[str] = project_name
+        self.profiles: List[str] = profiles
 
-        return await self.execute_with_connector(with_connector, **(connector_options or {}))
+        # return await self.run_client_session(client_session)
+
+    async def server_info(self, wait: bool = False, wait_timeout: Optional[float] = None):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+
+            sleep_time = 0.05
+            end = time.time() + wait_timeout if wait_timeout is not None else None
+            interrupted = False
+
+            def signal_handler(signal, frame):
+                nonlocal end, interrupted
+                end = time.time()
+                interrupted = True
+
+            signal.signal(signal.SIGINT, signal_handler)
+
+            while end is None or time.time() < end:
+                try:
+                    directory = await remote.get_directory_data()
+                    return 0, directory
+                except:
+                    pass
+
+                if not wait or interrupted:
+                    break
+
+                # Last try will most likely not happen
+                if end is not None:
+                    sleep_time = min(max(0, end - time.time()), sleep_time)
+                time.sleep(sleep_time)
+                sleep_time = min(2 * sleep_time, 1)
+
+            if interrupted:
+                return 2, {}
+
+            return 1, {}
+
+        return await self.run_client_session(client_session)
+
+    async def wait(self, services: Optional[List[str]] = None):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            await remote.get_project()
+
+            nonlocal services
+            if services is None:
+                services = await remote.get_default_services()
+
+            any_service_down = False
+            while not any_service_down:
+                service_data = await remote.get_services_data(services)
+                any_service_down = any([s["state"] == "stopped" for s in service_data])
+
+            return any_service_down
+
+        return await self.run_client_session(client_session)
+
+    async def wait_for_up(self, services: Optional[List[str]] = None):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            await remote.get_project()
+
+            nonlocal services
+            if services is None:
+                services = await remote.get_default_services()
+
+            all_services_up = False
+            while not all_services_up:
+                service_data = await remote.get_services_data(services)
+                all_services_up = all([s["state"] == "started" for s in service_data])
+
+            return all_services_up
+
+        return await self.run_client_session(client_session)
+
+    async def start(self, services=None, request_build=False, no_deps=False):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            existing_services = await remote.get_services()
+
+            if services is not None:
+                to_request = []
+                for service in services:
+                    if service not in existing_services:
+                        self.logger.warning(f"{service} does not exist on the server, skipping")
+                        continue
+                    to_request.append(service)
+            else:
+                to_request = await remote.get_default_services()
+
+            bad_responses = 0
+            for service in to_request:
+                response = await remote.start_service(service, request_build, no_deps)
+                if response.status == 200:
+                    message = await response.json()
+                    self.logger.info(f"{service}: {message}")
+                else:
+                    bad_responses += 1
+
+            return 0 if bad_responses == 0 else 1
+
+        return await self.run_client_session(run_client_commands)
+
+    async def images(self, services: Optional[List[str]] = None):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            directory_data = await remote.get_directory_data()
+            project = directory_data["project_name"]
+            working_directory = directory_data["working_directory"]
+
+            nonlocal services
+            if services is None:
+                services = await remote.get_services()
+
+            service_data = await remote.get_services_data(services)
+
+            return working_directory, project, service_data
+
+        return await self.run_client_session(client_session)
+
+    async def top(self, services: Optional[List[str]] = None):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            directory_data = await remote.get_directory_data()
+            project = directory_data["project_name"]
+            working_directory = directory_data["working_directory"]
+
+            nonlocal services
+            if services is None:
+                services = await remote.get_services()
+
+            processes = await remote.get_services_top(services)
+
+            return project, working_directory, processes
+
+        return await self.run_client_session(client_session)
+
+    async def ps(self, services: Optional[List[str]] = None, **kwargs):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            directory_data = await remote.get_directory_data()
+            project = directory_data["project_name"]
+            working_directory = directory_data["working_directory"]
+
+            nonlocal services
+            if services is None:
+                services = await remote.get_services()
+
+            services_data = await remote.get_services_data(services)
+            return project, working_directory, services_data
+
+        return await self.run_client_session(client_session)
+
+    async def attach(
+        self, service: str, context: bool = False, printer=print_message, inputer=sys.stdin.readline
+    ):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            async with await remote.attach_to_service(service, context) as ws:
+                exit_requested = False
+
+                def signal_handler(signal, frame):
+                    nonlocal exit_requested
+                    exit_requested = True
+                    asyncio.get_event_loop().create_task(ws.close())
+
+                signal.signal(signal.SIGINT, signal_handler)
+
+                async def print_ws_strings():
+                    while not ws.closed:
+                        try:
+                            line = await ws.receive_str()
+                            fields = json.loads(line)
+                            if not self.verbose and fields["levelno"] == logging.DEBUG:
+                                continue
+                            printer(fields)
+                        except TypeError:
+                            if not exit_requested:
+                                self.logger.warning("Connection broken")
+                            # TODO: how to break the sys.stdin.readline?
+                            #       cannot really make it asyncio on Windows...
+                            #       https://stackoverflow.com/questions/31510190/aysncio-cannot-read-stdin-on-windows
+                            break
+
+                loop = asyncio.get_running_loop()
+                loop.create_task(print_ws_strings())
+
+                try:
+                    while not ws.closed:
+                        input_line = await loop.run_in_executor(None, inputer)
+                        if not ws.closed:
+                            await ws.send_str(input_line)
+                    return 0
+                except asyncio.CancelledError:
+                    self.logger.debug("Attach cancelled")
+                    return 1
+
+        return await self.run_client_session(client_session)
+
+    async def logs(
+        self,
+        services: Optional[List[str]] = None,
+        print_function: Optional[Callable] = None,
+        follow: bool = False,
+        context: Optional[bool] = None,
+        since: Optional[datetime.datetime] = None,
+        until: Optional[datetime.datetime] = None,
+        tail: Optional[int] = None,
+    ):
+        async def stream_logs_response(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+
+            async def logs_request():
+                common_args = dict(
+                    follow=follow, context=context, since=since, until=until, tail=tail
+                )
+                if services is not None and len(services) == 1:
+                    return await remote.open_service_logs(services[0], **common_args)
+                else:
+                    return await remote.open_logs(services=services, **common_args)
+
+            async with await logs_request() as response:
+                close_requested = False
+
+                def signal_handler(signal, frame):
+                    nonlocal close_requested
+                    close_requested = True
+                    asyncio.get_event_loop().call_soon_threadsafe(response.close)
+
+                signal.signal(signal.SIGINT, signal_handler)
+
+                try:
+                    self.logger.debug("Reading logs")
+                    async for line in response.content:
+                        fields = json.loads(line.decode())
+                        if not self.verbose and fields["levelno"] == logging.DEBUG:
+                            continue
+                        if print_function is not None:
+                            print_function(fields)
+                    return 0
+                except asyncio.CancelledError:
+                    self.logger.debug("Request cancelled")
+                    return 1
+                except aiohttp.ClientConnectionError as ex:
+                    if not close_requested:
+                        self.logger.warning("Connection error {ex}")
+                        return 2
+            return 0
+
+        return await self.run_client_session(stream_logs_response)
+
+    async def kill(self, services=None, signal=9):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            project = await remote.get_project()
+            existing_services = await remote.get_services()
+
+            if services is not None:
+                for service in services:
+                    if service not in existing_services:
+                        self.logger.warning(f"{service} does not exist on the server, skipping")
+                        continue
+                    response = await remote.kill_service(service, signal)
+                    message = await response.json()
+                    self.logger.info(f"{service}: {message}")
+            else:
+                response = await remote.kill_project(signal)
+                message = await response.json()
+                self.logger.info(f"{project}: {message}")
+
+            return 0 if 200 <= response.status < 300 else 1
+
+        return await self.run_client_session(run_client_commands)
+
+    async def restart(self, services=None, no_deps=False, timeout=None):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            project = await remote.get_project()
+            if services is not None and len(services) == 1:
+                response = await remote.restart_service(
+                    services[0], no_deps=no_deps, timeout=timeout
+                )
+                if response.status == 200:
+                    message = await response.json()
+                    self.logger.info(f"{services[0]}: {message}")
+            else:
+                response = await remote.restart_project(
+                    no_deps=no_deps, timeout=timeout, services=services
+                )
+                if response.status == 200:
+                    message = await response.json()
+                    self.logger.info(f"{project}: {message}")
+
+            return 0 if 200 <= response.status < 300 else 1
+
+        return await self.run_client_session(run_client_commands)
+
+    async def stop(self, services=None, request_clean=False, timeout=None):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            project = await remote.get_project()
+            existing_services = await remote.get_services()
+
+            if services is not None:
+                for service in services:
+                    if service not in existing_services:
+                        self.logger.warning(f"{service} does not exist on the server, skipping")
+                        continue
+
+                    self.logger.debug(f"Stopping /{project}/{service}")
+                    request = lambda: remote.stop_service(service, request_clean=request_clean)
+
+                    try:
+                        response = await asyncio.wait_for(
+                            request(),
+                            timeout=timeout,
+                        )
+                    except asyncio.exceptions.TimeoutError:
+                        self.logger.warning(f"Stopping {service} timed out after {timeout}")
+                        response = await request()
+
+                    if response.status == 200:
+                        message = await response.json()
+                        self.logger.info(f"{service}: {message}")
+            else:
+                request = lambda: remote.stop_project(request_clean=request_clean)
+
+                try:
+                    response = await asyncio.wait_for(request(), timeout=timeout)
+                except asyncio.exceptions.TimeoutError:
+                    self.logger.warning(f"Stopping {project} timed out after {timeout}")
+                    response = await request()
+
+                if response.status == 200:
+                    message = await response.json()
+                    self.logger.info(f"{project}: {message}")
+
+            return 0 if 200 <= response.status < 300 else 1
+
+        return await self.run_client_session(run_client_commands)
 
     async def check_server_is_running(self):
         try:
@@ -1396,214 +1404,61 @@ class Compose:
 
         return client_session
 
-    def make_proxy(self, session: aiohttp.ClientSession):
-        return ComposeProxy(
-            session, self.project_name, self.profiles, self.logger.getChild("proxy")
-        )
+    async def wait_for_server(self):
+        await self.run_client_session(self.make_wait_for_server())
 
+    def make_wait_for_server(self):
+        async def client_session(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            server_up = False
+            while not server_up:
+                try:
+                    await remote.get_directory_data(timeout=5)
+                    server_up = True
+                except:
+                    pass
 
-class ComposeProxy:
-    def __init__(
-        self,
-        session: aiohttp.ClientSession,
-        project_name: Optional[str],
-        profiles: List[str],
-        logger: logging.Logger,
-    ) -> None:
-        self.session: aiohttp.ClientSession = session
-        self.logger: logging.Logger = logger
+        return client_session
 
-        self.project: Optional[str] = project_name
-        self.project_confirmed: bool = False
+    async def run_client_session(self, session_function):
+        try:
+            return await self.execute_client_session(session_function)
+        except ClientConnectorError as ex:
+            self.logger.error(f"Connection error for {self.connection_path}: {ex}")
+        except FileNotFoundError as ex:
+            self.logger.error(f"Name error for {self.connection_path}: {ex}")
+        except ClientResponseError as ex:
+            self.logger.error(f"Error response: {ex}")
+        return 3
 
-        self.profiles: List[str] = profiles
+    async def execute_client_session(self, session_function, connector_options=None):
+        async def with_connector(connector):
+            hostname = gethostname()
+            async with aiohttp.ClientSession(
+                base_url=f"http://{hostname}",
+                connector=connector,
+                raise_for_status=True,
+                timeout=aiohttp.ClientTimeout(sock_connect=10, connect=10),
+            ) as session:
+                return await session_function(session)
 
-        self.directory_data: Optional[dict] = None
-        self.project_data: Dict[str, dict] = {}
+        return await self.execute_with_connector(with_connector, **(connector_options or {}))
 
-    async def get_directory_data(self):
-        async with self.session.get(f"/") as response:
-            self.directory_data = await response.json()
-        return self.directory_data
-
-    async def get_project(self):
-        await self.get_directory_data()
-
-        if self.directory_data is not None:
-            assert self.project == self.directory_data["project_name"]
-            self.project = self.directory_data["project_name"]
-            self.project_confirmed = True
+    async def execute_with_connector(self, connector_function, **kwargs):
+        self.logger.debug(f"Connect: {self.connection_path}")
+        if os.name == "nt":
+            async with aiohttp.NamedPipeConnector(path=self.connection_path, **kwargs) as connector:
+                return await connector_function(connector)
         else:
-            self.project_confirmed = False
+            async with aiohttp.UnixConnector(path=self.connection_path, **kwargs) as connector:
+                return await connector_function(connector)
 
-        return self.project
-
-    async def _assure_project(self, project=None):
-        if project is None and self.project_confirmed:
-            project = self.project
-        if project is None:
-            project = await self.get_project()
-        return project
-
-    async def get_project_data(self, project=None):
-        project = await self._assure_project(project)
-        async with self.session.get(f"/{project}", params={"profile": self.profiles}) as response:
-            self.project_data[project] = await response.json()
-
-        return self.project_data[project]
-
-    async def get_default_services(self):
-        data = await self.get_project_data()
-        return data["profile_services"] if self.profiles else data["default_services"]
-
-    async def get_services(self):
-        data = await self.get_project_data()
-        return data["services"]
-
-    async def get_services_data(self, services: List[str]):
-        project = await self._assure_project()
-        service_data: List[dict] = []
-        for service in services:
-            async with self.session.get(f"/{project}/{service}") as response:
-                service_data.append(await response.json())
-        return service_data
-
-    async def get_services_top(self, services: List[str]):
-        project = await self._assure_project()
-        process_data: List[dict] = []
-        for service in services:
-            async with self.session.get(f"/{project}/{service}/top") as response:
-                process_data.extend(await response.json())
-        return process_data
-
-    async def start_service(self, service: str, request_build: bool, no_deps: bool):
-        project = await self._assure_project()
-        return await self.session.post(
-            f"/{project}/{service}/start",
-            json={"request_build": request_build, "no_deps": no_deps},
-        )
-
-    async def stop_service(self, service: str, request_clean: bool):
-        project = await self._assure_project()
-        return await self.session.post(
-            f"/{project}/{service}/stop",
-            json={"request_clean": request_clean},
-        )
-
-    async def stop_project(self, request_clean: bool):
-        project = await self._assure_project()
-        return await self.session.post(
-            f"/{project}/stop",
-            json={"request_clean": request_clean},
-        )
-
-    async def restart_project(self, no_deps: bool, timeout=None, services=None):
-        project = await self._assure_project()
-        specification = {"no_deps": no_deps}
-        if timeout is not None:
-            specification["timeout"] = timeout
-        if services is not None:
-            specification["services"] = services
-
-        return await self.session.post(
-            f"/{project}/restart",
-            json=specification,
-        )
-
-    async def restart_service(self, service, no_deps: bool, timeout=None):
-        project = await self._assure_project()
-        specification = {"no_deps": no_deps}
-        if timeout is not None:
-            specification["timeout"] = timeout
-
-        return await self.session.post(
-            f"/{project}/{service}/restart",
-            json=specification,
-        )
-
-    async def kill_project(self, signal):
-        project = await self._assure_project()
-        self.logger.debug(f"Kill {signal} to /{project}")
-        return await self.session.post(
-            f"/{project}/kill",
-            json={"signal": signal},
-        )
-
-    async def kill_service(self, service, signal):
-        project = await self._assure_project()
-        self.logger.debug(f"Kill {signal} to /{project}/{service}")
-        return await self.session.post(
-            f"/{project}/{service}/kill",
-            json={"signal": signal},
-        )
-
-    def _logs_params(
-        self,
-        follow: bool = False,
-        context: Optional[bool] = None,
-        since: Optional[datetime.datetime] = None,
-        until: Optional[datetime.datetime] = None,
-        tail: Optional[int] = None,
-    ):
-        if context is None:
-            context = not follow
-
-        params = [
-            ("format", "json"),
-            ("context", "on" if context else "no"),
-            ("follow", "on" if follow else "no"),
-        ]
-        if since is not None:
-            params.append(("since", since.isoformat()))
-        if until is not None:
-            params.append(("until", until.isoformat()))
-        if tail is not None:
-            params.append(("tail", f"{tail}"))
-
-        return params
-
-    async def open_service_logs(
-        self,
-        service: str,
-        follow: bool = False,
-        context: Optional[bool] = None,
-        since: Optional[datetime.datetime] = None,
-        until: Optional[datetime.datetime] = None,
-        tail: Optional[int] = None,
-    ):
-        project = await self._assure_project()
-        params = self._logs_params(follow, context, since, until, tail)
-        return self.session.get(
-            f"/{project}/{service}/logs",
-            params=params,
-            timeout=0,
-        )
-
-    async def open_logs(
-        self,
-        services: Optional[List[str]] = None,
-        follow: bool = False,
-        context: Optional[bool] = None,
-        since: Optional[datetime.datetime] = None,
-        until: Optional[datetime.datetime] = None,
-        tail: Optional[int] = None,
-    ):
-        project = await self._assure_project()
-        params = self._logs_params(follow, context, since, until, tail)
-        if services:
-            params += [("service", s) for s in services]
-        return self.session.get(
-            f"/{project}/logs",
-            params=params,
-            timeout=0,
-        )
-
-    async def attach_to_service(self, service: str, context: bool):
-        project = await self._assure_project()
-        return self.session.ws_connect(
-            f"/{project}/{service}/attach",
-            params={"format": "json", "context": "on" if context else "no"},
-            timeout=0,
+    def make_client(self, session: aiohttp.ClientSession):
+        return ComposeClient(
+            logger=self.logger.getChild("client"),
+            session=session,
+            project_name=self.project_name,
+            profiles=self.profiles,
         )
 
 

@@ -610,14 +610,14 @@ def main():
                 return asyncio.run(
                     compose.logs(
                         services,
+                        color=None if options.logs_no_color is None else not options.logs_no_color,
+                        timestamps=options.timestamps,
+                        prefix=None if options.no_log_prefix is None else not options.no_log_prefix,
                         context=options.with_context,
                         follow=options.follow,
                         since=options.since,
                         until=options.until,
                         tail=options.tail,
-                        color=None if options.logs_no_color is None else not options.logs_no_color,
-                        timestamps=options.timestamps,
-                        prefix=None if options.no_log_prefix is None else not options.no_log_prefix,
                     )
                 )
             elif options.command == "attach":
