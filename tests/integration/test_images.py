@@ -45,3 +45,5 @@ def test_images_when_up(process_cleaner):
             assert any([line.startswith(s) for s in ["simple1", "simple2"]])
     finally:
         subprocess.call(["composeit", "down"], cwd=service_directory)
+        rc = up.wait(5)
+        assert rc is not None
