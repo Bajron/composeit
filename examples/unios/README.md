@@ -22,4 +22,4 @@ composeit logs
 composeit down
 ```
 
-This example can be used also as a smoke test.
+This example can be also used as a smoke test.

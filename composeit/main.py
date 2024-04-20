@@ -402,6 +402,7 @@ def main():
 
         cfg_log.debug(f"Parsed options: {options}")
         cfg_log.debug(f"os.name = {os.name}")
+        cfg_log.debug(f"sys.platform = {sys.platform}")
     else:
         logging.basicConfig(level=logging.INFO, format="%(message)s")
 

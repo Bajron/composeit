@@ -1,5 +1,6 @@
 import subprocess
 import os
+import sys
 
 from .utils import *
 
@@ -8,7 +9,7 @@ def test_kill(process_cleaner):
     service_directory = tests_directory / "projects" / "stopping"
 
     try:
-        os.environ["INTERRUPT_SIGNAL"] = "CTRL_C_EVENT" if os.name == "nt" else "SIGINT"
+        os.environ["INTERRUPT_SIGNAL"] = "CTRL_C_EVENT" if sys.platform == "win32" else "SIGINT"
 
         up = subprocess.Popen(
             ["composeit", "up"],

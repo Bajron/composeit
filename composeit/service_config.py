@@ -1,6 +1,7 @@
 import signal
 import logging
 import os
+import sys
 import shutil
 import dotenv
 import io
@@ -80,7 +81,7 @@ def get_signal(s: Union[int, str, signal.Signals]) -> signal.Signals:
 
 
 def get_default_kill() -> signal.Signals:
-    return get_signal("SIGTERM" if os.name == "nt" else "SIGKILL")
+    return get_signal("SIGTERM" if sys.platform else "SIGKILL")
 
 
 def get_stop_grace_period(config: dict) -> float:
@@ -173,7 +174,7 @@ def get_environment(
         env = None
     else:
         # TODO: minimal viable env
-        if os.name == "nt":
+        if sys.platform == "win32":
             env = {"SystemRoot": os.environ.get("SystemRoot", "")}
         else:
             env = {}
