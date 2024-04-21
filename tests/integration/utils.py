@@ -142,6 +142,7 @@ def ps_wait(service_directory, *args, services=None, sleep=0, tries=5, until):
             break
         time.sleep(sleep)
         states = ps(service_directory, *args, services=services)
+    return states
 
 
 def all_up(services):
