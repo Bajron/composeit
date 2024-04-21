@@ -31,7 +31,7 @@ from .utils import (
 
 from .client import ComposeProxy
 from .server import ComposeServer
-from typing import List, Dict, Optional, Iterable, Mapping, Set
+from typing import List, Dict, Optional, Iterable, Mapping, Set, Any
 
 USABLE_COLORS = list(termcolor.COLORS.keys())[2:-1]
 
@@ -97,6 +97,9 @@ class Compose:
 
         self.services: Dict[str, AsyncProcess] = {}
 
+        self.wait_for_services: Optional[asyncio.Future] = None
+        self.reload_in_progress: bool = False
+
         self.proxy = ComposeProxy(
             self.logger.getChild("proxy"),
             self.verbose,
@@ -120,13 +123,16 @@ class Compose:
         assert self.service_config is not None
         return self.service_config["services"] or {}
 
-    def get_defaults_services(self, with_profiles: Optional[List[str]] = None) -> Iterable[str]:
+    def get_default_services(self, with_profiles: Optional[List[str]] = None) -> Iterable[str]:
         profiles = with_profiles if with_profiles is not None else self.profiles
         return [
             key
             for key, service in self.get_services_configs().items()
             if "profile" not in service or service["profile"] in profiles
         ]
+
+    def get_service_ids_in_config(self):
+        return list(self.get_services_configs().keys())
 
     def get_service_ids(self) -> List[str]:
         return list(self.services.keys())
@@ -203,7 +209,9 @@ class Compose:
 
     def get_always_restart_services(self):
         return [
-            name for name, service in self.services.items() if service.restart_policy == "always"
+            name
+            for name, service in self.services.items()
+            if service.get_restart_policy() == "always"
         ]
 
     async def build(self, services=None):
@@ -266,7 +274,7 @@ class Compose:
             return await self.proxy.stop(services, request_clean, timeout)
         else:
             self.logger.error("Server is not running")
-            return 1
+            return 2
 
     async def restart(self, services=None, **kwargs):
         server_up = await self.proxy.check_server_is_running()
@@ -274,7 +282,7 @@ class Compose:
             return await self.proxy.restart(services, **kwargs)
         else:
             self.logger.error("Server is not running")
-            return 1
+            return 2
 
     async def kill(self, services=None, signal=9):
         server_up = await self.proxy.check_server_is_running()
@@ -282,7 +290,7 @@ class Compose:
             return await self.proxy.kill(services, signal)
         else:
             self.logger.error("Server is not running")
-            return 1
+            return 2
 
     async def logs(
         self,
@@ -304,7 +312,7 @@ class Compose:
             return await self.proxy.logs(services, print_function=print_function, **kwargs)
         else:
             self.logger.error("Server is not running")
-            return 1
+            return 2
 
     async def attach(self, service: str, context: bool = False):
         server_up = await self.proxy.check_server_is_running()
@@ -312,7 +320,7 @@ class Compose:
             return await self.proxy.attach(service, context)
         else:
             self.logger.error("Server is not running")
-            return 1
+            return 2
 
     async def images(self, services: Optional[List[str]] = None):
         server_up = await self.proxy.check_server_is_running()
@@ -512,8 +520,10 @@ class Compose:
         code, info = await self.proxy.server_info(wait, wait_timeout)
         if code == 0:
             print(info)
+            return 0
         elif code == 1:
             print("Server is not running")
+            return 2
 
     async def wait_for_up(self, services=None):
         await self.proxy.wait_for_server()
@@ -528,7 +538,15 @@ class Compose:
                 await self.down()
         else:
             self.logger.error("Server is not running")
-            return 1
+            return 2
+
+    async def reload(self):
+        server_up = await self.proxy.check_server_is_running()
+        if server_up:
+            return await self.proxy.reload()
+        else:
+            self.logger.error("Server is not running")
+            return 2
 
     def get_call_json(self):
         return {
@@ -541,8 +559,8 @@ class Compose:
     def get_project_json(self, profiles: List[str]):
         return {
             "services": list(self.services.keys()),
-            "default_services": list(self.get_defaults_services()),
-            "profile_services": list(self.get_defaults_services(with_profiles=profiles)),
+            "default_services": list(self.get_default_services()),
+            "profile_services": list(self.get_default_services(with_profiles=profiles)),
         }
 
     def get_service_json(self, service_name):
@@ -680,7 +698,7 @@ class Compose:
             )
 
             if services is None:
-                input_services = list(self.get_defaults_services())
+                input_services = list(self.get_default_services())
                 start_services = input_services.copy()
             else:
                 input_services = services.copy()
@@ -731,8 +749,22 @@ class Compose:
             for name in sequence:
                 self.services[name].start()
 
-            self.logger.debug("Waiting for services")
-            await asyncio.gather(*[s.watch() for s in self.services.values()])
+            while True:
+                self.logger.debug("Waiting for services")
+                self.wait_for_services = asyncio.shield(
+                    asyncio.gather(*[s.run() for s in self.services.values()])
+                )
+                try:
+                    await self.wait_for_services
+                    break
+                except asyncio.CancelledError:
+                    self.wait_for_services = None
+                    self.logger.info("Waiting for services interrupted")
+                    if self.reload_in_progress:
+                        self.reload_in_progress = False
+                    else:
+                        raise
+
             self.logger.debug("Services closed")
         except Exception as ex:
             self.logger.debug(get_stack_string())
@@ -750,6 +782,68 @@ class Compose:
             return self.services[code_from].rc
         else:
             return 0
+
+    async def trigger_reload(self):
+        if not self.reload_in_progress:
+            self.reload_in_progress = True
+            self.reload_configuration()
+            self.add_services()
+            self.check_orphans()
+
+            if self.wait_for_services:
+                self.wait_for_services.cancel()
+
+    def reload_configuration(self):
+        self.load_service_config()
+        services_configs = self.get_services_configs()
+
+        for k, v in self.services.items():
+            if k in self.get_service_ids():
+                v.update_config(services_configs[k])
+
+    def add_services(self, execute=True, execute_build=False, execute_clean=False):
+        created_services = self.get_service_ids()
+        config_services = self.get_service_ids_in_config()
+
+        new_services = list(set(config_services).difference(set(created_services)))
+
+        if len(new_services) > 0:
+            self.logger.info(f"{len(new_services)} new services detected")
+            services_configs = self.get_services_configs()
+
+            services_count = len(self.services)
+            self.services = {
+                name: AsyncProcess(
+                    services_count + index,
+                    name,
+                    services_configs[name],
+                    self._get_next_color(),
+                    execute=execute,
+                    execute_build=execute_build,
+                    execute_clean=execute_clean,
+                    build_args=self.build_args,
+                    verbose=self.verbose,
+                )
+                for (index, name) in enumerate(new_services)
+            }
+
+            # NOTE: for now new services must be handled manually
+
+            # TODO: attaching logs to the main console and so on
+            # Logs if: attach is None or attach_dependencies and restart==always
+            # Start sequence if: restart always, (new service is a dependency of running service? nope)
+            #                    or it is a new default service
+
+    def check_orphans(self):
+        created_services = self.get_service_ids()
+        config_services = self.get_service_ids_in_config()
+
+        orphaned_services = list(set(created_services).difference(set(config_services)))
+
+        if len(orphaned_services) > 0:
+            self.logger.warning(
+                f"{len(orphaned_services)} orphaned services detected: {orphaned_services}"
+            )
 
 
 def get_communication_path(directory_path: pathlib.Path, project_name: Optional[str] = None) -> str:

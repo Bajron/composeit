@@ -127,22 +127,11 @@ class AsyncProcess:
         self.watch_coro: Optional[asyncio.Future] = None
         self.sleep_task: Optional[asyncio.Task] = None
 
+        self.run_task: Optional[asyncio.Task] = None
+
         self.preferred_encoding = locale.getpreferredencoding(False)
 
         self.build_args: Dict[str, str] = build_args or {}
-
-        # NOTE: YAML translates `no` to False
-        self.restart_policy = service_config.get("restart", "no") or "no"
-        assert (
-            self.restart_policy in RestartPolicyOptions
-        ), f"restart value must be in {RestartPolicyOptions}, recieved {self.restart_policy}"
-
-        self.restart_policy_config: dict = {
-            "delay": 5,
-            "max_attempts": "infinite",
-            "window": 0,
-        }
-        self.restart_policy_config.update(service_config.get("restart_policy", {}))
 
         self.popen_kw: Dict[str, Any] = {}
 
@@ -156,6 +145,10 @@ class AsyncProcess:
 
         self.on_stop: List[Callable] = []
 
+    def update_config(self, service_config: dict):
+        # We rely on lazy reading
+        self.service_config = service_config
+
     def _adapt_logger(self, logger: logging.Logger) -> logging.LoggerAdapter:
         return logging.LoggerAdapter(
             logger,
@@ -168,7 +161,25 @@ class AsyncProcess:
     def request_build(self):
         self.execute_build = True
 
-    def get_processes_info(self):
+    def get_restart_policy(self) -> str:
+        # NOTE: YAML translates `no` to False
+        restart_policy = self.service_config.get("restart", "no") or "no"
+        assert (
+            restart_policy in RestartPolicyOptions
+        ), f"restart value must be in {RestartPolicyOptions}, received {restart_policy}"
+
+        return restart_policy
+
+    def get_restart_policy_config(self) -> dict:
+        restart_policy_config: dict = {
+            "delay": 5,
+            "max_attempts": "infinite",
+            "window": 0,
+        }
+        restart_policy_config.update(self.service_config.get("restart_policy", {}))
+        return restart_policy_config
+
+    def get_processes_info(self) -> List[Dict[str, Any]]:
         def serialize_process(p: psutil.Process):
             row: Dict[str, Any] = {}
             row["username"] = p.username()
@@ -193,7 +204,7 @@ class AsyncProcess:
                 pass
         return processes
 
-    def get_state(self):
+    def get_state(self) -> str:
         if self.terminated:
             if self.stop_time is not None:
                 return "terminated"
@@ -388,7 +399,12 @@ class AsyncProcess:
     async def _resolve_restart(self):
         self.restarting = True
 
-        max_attempts = self.restart_policy_config["max_attempts"]
+        restart_policy = self.get_restart_policy()
+        restart_config = self.get_restart_policy_config()
+
+        delay_restart = duration_to_seconds(restart_config["delay"])
+
+        max_attempts = restart_config["max_attempts"]
         attempt = 0
         self.log.debug(
             f"Resolving restart for {self.name}, attempt={attempt}, "
@@ -399,10 +415,10 @@ class AsyncProcess:
             if self.terminated:
                 return False
 
-            if self.restart_policy in ["always", "unless-stopped"] and not self.stop_requested():
-                restarted = await self._restart_process()
-            elif self.restart_policy == "on-failure" and self.rc != 0 and not self.stop_requested():
-                restarted = await self._restart_process()
+            if restart_policy in ["always", "unless-stopped"] and not self.stop_requested():
+                restarted = await self._restart_process(delay_restart)
+            elif restart_policy == "on-failure" and self.rc != 0 and not self.stop_requested():
+                restarted = await self._restart_process(delay_restart)
             else:
                 return False
 
@@ -411,7 +427,7 @@ class AsyncProcess:
                 continue
 
             await self._wait_for_started()
-            success_after = duration_to_seconds(self.restart_policy_config["window"])
+            success_after = duration_to_seconds(restart_config["window"])
             if success_after <= 0:
                 return True
 
@@ -431,7 +447,12 @@ class AsyncProcess:
         self.log.error(f"Restarting gave up after {max_attempts} attempts")
         return False
 
-    async def watch(self):
+    def run(self):
+        if self.run_task is None:
+            self.run_task = asyncio.create_task(self._watch())
+        return self.run_task
+
+    async def _watch(self):
         self.terminated_and_done = False
 
         await self.resolve_build()
@@ -461,13 +482,11 @@ class AsyncProcess:
                 while process_started:
                     assert self.watch_coro is not None
                     await self.watch_coro
-                    self.log.info(
-                        f"{self.service_config['command']} finished with error code {self.rc}"
-                    )
+                    self.log.info(f"{self.command} finished with error code {self.rc}")
                     for c in self.on_stop:
                         await c(self)
 
-                    self.log.info(f"Restart policy is {self.restart_policy}")
+                    self.log.info(f"Restart policy is {self.get_restart_policy()}")
                     process_started = await self._resolve_restart()
                     self.restarting = False
                 # FIXME: this may happen after start() / quick stop() and start()
@@ -487,6 +506,7 @@ class AsyncProcess:
         await self.resolve_clean()
 
         self.terminated_and_done = True
+        self.run_task = None
 
     async def resolve_build(self):
         if not self.execute_build:
@@ -584,7 +604,7 @@ class AsyncProcess:
             self.log.warning("Does not seem to be stopped")
             return False
 
-    async def _sleep(self, seconds):
+    async def _sleep(self, seconds: float):
         try:
             self.sleep_task = asyncio.create_task(asyncio.sleep(seconds))
             await self.sleep_task
@@ -595,11 +615,10 @@ class AsyncProcess:
         if self.sleep_task is not None:
             self.sleep_task.cancel()
 
-    async def _restart_process(self):
-        sleep_time = self.restart_policy_config["delay"]
-        self.log.debug(f"Waiting for {sleep_time} seconds before restarting")
+    async def _restart_process(self, delay: float):
+        self.log.debug(f"Waiting for {delay} seconds before restarting")
 
-        await self._sleep(duration_to_seconds(sleep_time))
+        await self._sleep(delay)
 
         # Check after a long sleep
         if self.terminated or self.stop_requested():

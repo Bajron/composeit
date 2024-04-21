@@ -373,6 +373,18 @@ class ComposeProxy:
 
         return await self.run_client_session(run_client_commands)
 
+    async def reload(self):
+        async def run_client_commands(session: aiohttp.ClientSession):
+            remote = self.make_client(session)
+            response = await remote.reload_project()
+            if response.status == 200:
+                message = await response.json()
+                self.logger.info(f"{remote.project}: {message}")
+
+            return 0 if 200 <= response.status < 300 else 1
+
+        return await self.run_client_session(run_client_commands)
+
     async def check_server_is_running(self):
         try:
             data = await self.execute_client_session(
@@ -568,6 +580,11 @@ class ComposeClient:
             f"/{project}/restart",
             json=specification,
         )
+
+    async def reload_project(self):
+        project = await self._assure_project()
+
+        return await self.session.post(f"/{project}/reload")
 
     async def restart_service(self, service, no_deps: bool, timeout=None):
         project = await self._assure_project()

@@ -391,6 +391,8 @@ def main():
         help="Wait time",
     )
 
+    parser_reload = subparsers.add_parser("reload", help="Reload config")
+
     options = parser.parse_args()
 
     if options.verbose:
@@ -644,6 +646,8 @@ def main():
                 return asyncio.run(
                     compose.server_info(wait=options.wait, wait_timeout=options.wait_timeout)
                 )
+            elif options.command == "reload":
+                return asyncio.run(compose.reload())
             else:
                 cfg_log.error(f"Unhandled option {options.command}")
                 return 10

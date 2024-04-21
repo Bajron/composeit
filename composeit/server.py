@@ -25,7 +25,7 @@ from typing import List, Optional
 
 class ComposeServer:
     def __init__(self, compose, logger: logging.Logger) -> None:
-        # FIXME: yeah... not nice. Avoiding circual import and getting type
+        # FIXME: yeah... not nice. Avoiding circual import and getting type hints
         #        Proper Protocol or ABC should be here I guess.
         #        Would be good to remove direct calls to self.compose.services btw.
         from .compose import Compose
@@ -40,7 +40,7 @@ class ComposeServer:
     def _get_project(self, request: web.Request):
         project = request.match_info.get("project", "")
         if project != self.project_name:
-            return web.Response(status=404)
+            raise web.HTTPNotFound(reason="Project mismatch")
         return project
 
     def _get_service(self, request: web.Request):
@@ -296,6 +296,13 @@ class ComposeServer:
 
         return web.json_response("Restarted")
 
+    async def post_reload_project(self, request: web.Request):
+        self._get_project(request)
+
+        await self.compose.trigger_reload()
+
+        return web.json_response("Reloaded")
+
     def start_server(self):
         self.app = web.Application()
         self.app.add_routes(
@@ -314,6 +321,7 @@ class ComposeServer:
                 web.post("/{project}/kill", self.post_kill_project),
                 web.post("/{project}/{service}/restart", self.post_restart_service),
                 web.post("/{project}/restart", self.post_restart_project),
+                web.post("/{project}/reload", self.post_reload_project),
             ]
         )
 

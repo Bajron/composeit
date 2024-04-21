@@ -46,6 +46,7 @@ source = ["../composeit", "*/site-packages/composeit"]
 
 [tool.coverage.run]
 source = ["composeit", "."]
+concurrency = ["multiprocessing"]
 
 [tool.coverage.report]
 show_missing = true
