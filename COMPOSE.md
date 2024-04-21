@@ -332,6 +332,7 @@ composeit
 * `[~]` variable substitution
 * `[ ]` labels
 * `[ ]` health checks
+* `[ ]` closing action
 * `[ ]` scaling
 * `[ ]` ulimit, maybe on Linux
 * `[ ]` cap add/drop, could be done on Linux I guess, but would require root

@@ -4,7 +4,7 @@ Process composing utility
 
 ## Notice
 
-This package is still during prototyping / intensive development.
+This package is still during prototyping / exploratory development.
 
 Currently it is as a toy project, not a production ready solution.
 Checkout a rough plan of development in [TODO.md](TODO.md) and [COMPOSE.md](COMPOSE.md)
@@ -53,7 +53,7 @@ Separate environment is recommended because of the custom `python-dotenv`
 pip install --upgrade https://github.com/Bajron/composeit
 ```
 
-### Official package isnot fully functional
+### Official package on PyPI is not fully functional
 
 There is only a limited support for variable expansions.
 
@@ -157,11 +157,10 @@ I wanted to organize a set of long running processes, not a pipeline.
 Later I also found [`honcho`](https://pypi.org/project/honcho/), seems ok for the task.
 
 There is also a package called [`just-compose`](https://pypi.org/project/just-compose/) (wanted that name! ;( ).
-I found it late. It seems to be kind of what I want.
-The example seems to be quite promising.
+I found it late. It seems to be kind of what I want. The example looks quite promising.
 The PyPy page suggests some specific use case, and I did not try it really.
 It does seem similar to [`docker-compose` yaml](https://docs.docker.com/compose/compose-file/).
-This could be what I wanted, but...
+Could be what I wanted, but...
 
 I figured I can write it myself, have some fun
 and learn a little bit of Python and `asyncio` by the way.
