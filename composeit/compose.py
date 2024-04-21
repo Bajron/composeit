@@ -85,8 +85,8 @@ class Compose:
         self.profiles: List[str] = profiles or []
         self.logger.debug(f"Profiles: {self.profiles}")
 
-        self.depending: Optional[Mapping[str, Iterable[str]]] = None
-        self.depends: Optional[Mapping[str, Iterable[str]]] = None
+        self.depending: Dict[str, Iterable[str]] = {}
+        self.depends: Dict[str, Iterable[str]] = {}
 
         self.shutdown_timeout: float = timeout
 
@@ -141,9 +141,14 @@ class Compose:
         return self.color_assigner.next() if self.use_colors else None
 
     def _parse_service_config(
-        self, check_consistency=True, interpolate=True, normalize=True, resolve_paths=True
+        self,
+        check_consistency=True,
+        interpolate=True,
+        normalize=True,
+        resolve_paths=True,
+        reload=False,
     ):
-        parsed_data = merge_configs(self.service_files.get_parsed_files())
+        parsed_data = merge_configs(self.service_files.get_parsed_files(reload))
         # TODO validate format
 
         self.service_config = parsed_data
@@ -181,8 +186,8 @@ class Compose:
                         raise Exception(f"Dependency {dep} not found")
                     depending[dep].append(name)
 
-        self.depending = depending
-        self.depends = depends
+        self.depending.update(depending)
+        self.depends.update(depends)
 
     def start_service(self, service: str, request_build: bool = False, no_deps: bool = False):
         sequence = [service] if no_deps else self.get_start_sequence([service])
@@ -632,19 +637,19 @@ class Compose:
     async def watch_services(
         self,
         services: Optional[List[str]] = None,
-        start_server=True,
-        execute=True,
-        execute_build=False,
-        execute_clean=False,
-        abort_on_exit=False,
-        code_from=None,
-        attach=None,
-        attach_dependencies=False,
-        no_attach=None,
-        no_deps=False,
-        no_log_prefix=False,
-        no_color=False,
-        timestamps=False,
+        start_server: bool = True,
+        execute: bool = True,
+        execute_build: bool = False,
+        execute_clean: bool = False,
+        abort_on_exit: bool = False,
+        code_from: Optional[str] = None,
+        attach: Optional[List[str]] = None,
+        attach_dependencies: bool = False,
+        no_attach: Optional[List[str]] = None,
+        no_deps: bool = False,
+        no_log_prefix: bool = False,
+        no_color: bool = False,
+        timestamps: bool = False,
     ):
         try:
             self.assure_service_config()
@@ -697,38 +702,24 @@ class Compose:
                 ComposeFormatter(fmt=process_log_format, use_color=self.use_colors and not no_color)
             )
 
-            if services is None:
-                input_services = list(self.get_default_services())
-                start_services = input_services.copy()
-            else:
-                input_services = services.copy()
-                additional = self.get_always_restart_services()
-                if len(additional) > 0:
-                    self.logger.debug(
-                        f"Services with restart policy 'always' are started as well: {additional}"
-                    )
-                start_services = input_services + additional
-
-            # Restart "always" are treated as dependency for the logs
-            log_services = (
-                self.get_start_sequence(start_services) if attach_dependencies else input_services
+            input_services, start_services = self._get_input_and_start_services(services)
+            show_logs = self._get_services_to_show(
+                input_services, start_services, attach, attach_dependencies, no_attach
             )
-            if attach is not None:
-                log_services += attach
 
-            show_logs = {}
-            for name in log_services:
-                no_attach_allows = no_attach is None or (
-                    len(no_attach) > 0 and name not in no_attach
-                )
-                # Attach_dependencies disables attach limiting behavior
-                attach_allows = attach_dependencies or attach is None or name in attach
-                show_logs[name] = no_attach_allows and attach_allows
+            def attach_log_handlers(names):
+                for name in names:
+                    self.services[name].feed_handler(
+                        service_log_handler, service=True, process=False
+                    )
+                    self.services[name].feed_handler(
+                        process_log_handler, service=False, process=True
+                    )
+                    self.services[name].attach_log_handlers(
+                        process_log_handler, service_log_handler
+                    )
 
-            for name in [name for name, show in show_logs.items() if show]:
-                self.services[name].feed_handler(service_log_handler, service=True, process=False)
-                self.services[name].feed_handler(process_log_handler, service=False, process=True)
-                self.services[name].attach_log_handlers(process_log_handler, service_log_handler)
+            attach_log_handlers([name for name, show in show_logs.items() if show])
 
             async def on_exit_aborter(source_service: AsyncProcess):
                 self.logger.debug(f"Aborting after {source_service.name} stop")
@@ -760,7 +751,31 @@ class Compose:
                 except asyncio.CancelledError:
                     self.wait_for_services = None
                     self.logger.info("Waiting for services interrupted")
+
                     if self.reload_in_progress:
+                        # TODO: Should these come from here or from the start request
+                        added_services = self.add_services(execute, execute_build, execute_clean)
+                        # TODO: take care of orphans eventually as an option
+                        orphaned_services = self.check_orphans()
+
+                        input_services, start_services = self._get_input_and_start_services(
+                            services
+                        )
+                        show_logs = self._get_services_to_show(
+                            input_services, start_services, attach, attach_dependencies, no_attach
+                        )
+
+                        to_attach = [name for name, show in show_logs.items() if show]
+                        attach_log_handlers([name for name in to_attach if name in added_services])
+
+                        sequence = (
+                            start_services if no_deps else self.get_start_sequence(start_services)
+                        )
+                        for name in [name for name in sequence if name in added_services]:
+                            self.services[name].start()
+
+                        # NOTE: reload behaves like up actually...
+
                         self.reload_in_progress = False
                     else:
                         raise
@@ -783,36 +798,83 @@ class Compose:
         else:
             return 0
 
-    async def trigger_reload(self):
-        if not self.reload_in_progress:
-            self.reload_in_progress = True
-            self.reload_configuration()
-            self.add_services()
-            self.check_orphans()
+    def _get_input_and_start_services(self, services: Optional[List[str]] = None):
+        if services is None:
+            input_services = list(self.get_default_services())
+            start_services = input_services.copy()
+        else:
+            input_services = services.copy()
+            additional = self.get_always_restart_services()
+            if len(additional) > 0:
+                self.logger.debug(
+                    f"Services with restart policy 'always' are started as well: {additional}"
+                )
+            start_services = input_services + additional
+        return input_services, start_services
 
-            if self.wait_for_services:
-                self.wait_for_services.cancel()
+    def _get_services_to_show(
+        self,
+        input_services: List[str],
+        start_services: List[str],
+        attach: Optional[List[str]] = None,
+        attach_dependencies: bool = False,
+        no_attach: Optional[List[str]] = None,
+    ):
+        # Restart "always" are treated as dependency for the logs
+        log_services = (
+            self.get_start_sequence(start_services) if attach_dependencies else input_services
+        )
+        if attach is not None:
+            log_services += attach
+
+        show_logs = {}
+        for name in log_services:
+            no_attach_allows = no_attach is None or (len(no_attach) > 0 and name not in no_attach)
+            # Attach_dependencies disables attach limiting behavior
+            attach_allows = attach_dependencies or attach is None or name in attach
+            show_logs[name] = no_attach_allows and attach_allows
+
+        return show_logs
+
+    async def trigger_reload(self):
+        if self.reload_in_progress:
+            self.logger.debug("Reload requested when reload is in progress")
+            return
+
+        self.reload_in_progress = True
+        self.reload_configuration()
+
+        new_services = self.get_not_created_services()
+        if self.wait_for_services and len(new_services) > 0:
+            self.logger.debug("Interrupting waiting for services")
+            self.wait_for_services.cancel()
+        else:
+            self.reload_in_progress = False
 
     def reload_configuration(self):
-        self.load_service_config()
+        self.load_service_config(reload=True)
         services_configs = self.get_services_configs()
 
         for k, v in self.services.items():
-            if k in self.get_service_ids():
+            if k in services_configs:
                 v.update_config(services_configs[k])
 
-    def add_services(self, execute=True, execute_build=False, execute_clean=False):
+    def get_not_created_services(self) -> List[str]:
         created_services = self.get_service_ids()
         config_services = self.get_service_ids_in_config()
 
         new_services = list(set(config_services).difference(set(created_services)))
+        return new_services
+
+    def add_services(self, execute=True, execute_build=False, execute_clean=False):
+        new_services = self.get_not_created_services()
 
         if len(new_services) > 0:
             self.logger.info(f"{len(new_services)} new services detected")
             services_configs = self.get_services_configs()
 
             services_count = len(self.services)
-            self.services = {
+            services_to_add = {
                 name: AsyncProcess(
                     services_count + index,
                     name,
@@ -827,12 +889,9 @@ class Compose:
                 for (index, name) in enumerate(new_services)
             }
 
-            # NOTE: for now new services must be handled manually
+            self.services.update(services_to_add)
 
-            # TODO: attaching logs to the main console and so on
-            # Logs if: attach is None or attach_dependencies and restart==always
-            # Start sequence if: restart always, (new service is a dependency of running service? nope)
-            #                    or it is a new default service
+        return new_services
 
     def check_orphans(self):
         created_services = self.get_service_ids()
@@ -844,6 +903,8 @@ class Compose:
             self.logger.warning(
                 f"{len(orphaned_services)} orphaned services detected: {orphaned_services}"
             )
+
+        return orphaned_services
 
 
 def get_communication_path(directory_path: pathlib.Path, project_name: Optional[str] = None) -> str:

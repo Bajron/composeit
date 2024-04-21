@@ -32,7 +32,11 @@ class ServiceFiles:
             pass
         return None
 
-    def get_parsed_files(self) -> List[dict]:
+    def get_parsed_files(self, reload=False) -> List[dict]:
+        if reload:
+            # TODO: Something more elaborate with checking changes?
+            self._load_files()
+
         self._assure_loaded()
         assert self.loaded_files is not None
         return self.loaded_files
