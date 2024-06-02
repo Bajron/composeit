@@ -6,7 +6,7 @@ Process composing utility
 
 This package is still during prototyping / exploratory development.
 
-Currently it is as a toy project, not a production ready solution.
+Currently it is as a toy/experimental project, not a production ready solution.
 Checkout a rough plan of development in [TODO.md](TODO.md) and [COMPOSE.md](COMPOSE.md)
 
 It might be just good enough for your use case, but no guarantees.
@@ -29,9 +29,13 @@ This is ok. Let's see what we can get.
 ## Installing
 
 Direct installation via git is the recommended way of installing the package.
+
 You can use:
 * git+https://github.com/Bajron/composeit.git
 * git+ssh://git@github.com/Bajron/composeit
+
+Note that these point to the main branch of the project.
+This project does not have a released version/tag yet.
 
 ### pipx
 
@@ -44,7 +48,7 @@ Get `pipx` and then:
 pipx install https://github.com/Bajron/composeit
 ```
 
-(until the package is public you can use `git+ssh://git@github.com/Bajron/composeit`)
+(alternatively you can use `git+ssh://git@github.com/Bajron/composeit`)
 
 ### pip
 
@@ -53,22 +57,8 @@ Separate environment is recommended because of the custom `python-dotenv`
 pip install --upgrade https://github.com/Bajron/composeit
 ```
 
-### Official package on PyPI is not fully functional
-
-There is only a limited support for variable expansions.
-
-A package with a direct dependency (custom `python-dotenv` in our case) cannot be uploaded to PyPI.
-
-Some day:
-```
-pip install --upgrade composeit
-```
-...or similar with `pipx` should work as well.
-
-To make it fully functional you can add the custom `python-dotenv` with
-```
-pip install --upgrade python-dotenv@git+https://github.com/Bajron/python-dotenv.git@v1.1.0
-```
+A package with a direct dependency (custom `python-dotenv` in our case)
+cannot be uploaded to PyPI, so simpler pip installation is rather unlikely.
 
 ### Quick start hacking this repository
 
@@ -140,6 +130,14 @@ This package uses my fork of the package.
 https://github.com/Bajron/python-dotenv/tree/v1.1.0
 
 For this reason separate virtual environment or `pipx` is recommended to avoid a version clash.
+
+If for some reason you want to use `composeit` with official `python-dotenv`,
+note there will be only a limited support for variable expansions in such combination.
+
+To get the custom `python-dotenv` later you can run
+```
+pip install --upgrade python-dotenv@git+https://github.com/Bajron/python-dotenv.git@v1.1.0
+```
 
 ## Why another tool?
 

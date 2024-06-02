@@ -3,7 +3,8 @@
 Contributions are welcome!
 Open [an issue](https://github.com/Bajron/composeit/issues/new) or send a pull request.
 
-Note that the project is still in early phase (see [TODO.md](TODO.md) and [COMPOSE.md](COMPOSE.md)).
+Note that this project is still in early phase or will never stop being just a toy/experiment
+(see [TODO.md](TODO.md) and [COMPOSE.md](COMPOSE.md)).
 Share your ideas and remarks before preparing a big code contribution not to double/waste the effort.
 
 This document describes setup for local development and testing.
