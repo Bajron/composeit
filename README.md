@@ -52,13 +52,11 @@ pipx install https://github.com/Bajron/composeit
 
 ### pip
 
-Separate environment is recommended because of the custom `python-dotenv`
 ```
 pip install --upgrade https://github.com/Bajron/composeit
 ```
 
-A package with a direct dependency (custom `python-dotenv` in our case)
-cannot be uploaded to PyPI, so simpler pip installation is rather unlikely.
+Now when `python-dotenv` features are vendored, PyPI package may eventually happen.
 
 ### Quick start hacking this repository
 
@@ -125,19 +123,14 @@ was a great example of setting up a Python project for me.
 
 Loading environment and variable expansion uses its implementation.
 
-I did not have patience to wait for my proposals there.
-This package uses my fork of the package.
+I did not have patience to wait for my proposals there
+(some may have little benefit for wider audience).
+This package uses my fork of the package, which is now vendored.
+
+Here is the fork, but I rarely go back to it:
 https://github.com/Bajron/python-dotenv/tree/v1.1.0
 
-For this reason separate virtual environment or `pipx` is recommended to avoid a version clash.
-
-If for some reason you want to use `composeit` with official `python-dotenv`,
-note there will be only a limited support for variable expansions in such combination.
-
-To get the custom `python-dotenv` later you can run
-```
-pip install --upgrade python-dotenv@git+https://github.com/Bajron/python-dotenv.git@v1.1.0
-```
+I will most likely reiterate my proposals to the upstream eventually.
 
 ## Why another tool?
 

@@ -4,7 +4,6 @@ import os
 import sys
 import platform
 import logging
-import dotenv
 import asyncio
 import subprocess
 import json
@@ -13,6 +12,7 @@ import importlib.metadata
 
 from typing import Dict, Any
 
+from .dotenv import load_dotenv
 from .compose import Compose
 from .process import PossibleStates
 from .utils import get_stack_string, date_or_duration
@@ -483,7 +483,7 @@ def main():
     for env_file in env_files:
         if env_file.exists():
             cfg_log.debug(f"Reading environment file {env_file}")
-            dotenv.load_dotenv(env_file, override=True, single_quotes_expand=False)
+            load_dotenv(env_file, override=True, single_quotes_expand=False)
         else:
             print("Provided environment file does not exist", file=sys.stderr)
             return 1

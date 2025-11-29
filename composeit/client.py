@@ -24,7 +24,6 @@ class ComposeProxy:
         project_name: Optional[str] = None,
         profiles: List[str] = [],
     ) -> None:
-
         self.connection_path: str = connection_path
         self.logger: logging.Logger = logger
         self.verbose: bool = verbose
