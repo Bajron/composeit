@@ -1,0 +1,333 @@
+import io
+import logging
+import os
+import sys
+from collections import OrderedDict
+from contextlib import contextmanager
+from typing import IO, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union, overload
+
+from .parser import Binding, parse_stream
+from .variables import parse_variables
+
+# A type alias for a string path to be used for the paths in this file.
+# These paths may flow to `open()` and `shutil.move()`; `shutil.move()`
+# only accepts string paths, not byte paths or file descriptors. See
+# https://github.com/python/typeshed/pull/6832.
+StrPath = Union[str, "os.PathLike[str]"]
+
+logger = logging.getLogger(__name__)
+
+
+def with_warn_for_invalid_lines(mappings: Iterator[Binding]) -> Iterator[Binding]:
+    for mapping in mappings:
+        if mapping.error:
+            logger.warning(
+                "Could not parse environment configuration statement starting at line %s",
+                mapping.original.line,
+            )
+        yield mapping
+
+
+class DotEnv:
+    def __init__(
+        self,
+        dotenv_path: Optional[StrPath],
+        stream: Optional[IO[str]] = None,
+        verbose: bool = False,
+        encoding: Optional[str] = None,
+        interpolate: bool = True,
+        single_quotes_expand: bool = True,
+        override: bool = True,
+    ) -> None:
+        self.dotenv_path: Optional[StrPath] = dotenv_path
+        self.stream: Optional[IO[str]] = stream
+        self._dict: Optional[Dict[str, Optional[str]]] = None
+        self.verbose: bool = verbose
+        self.encoding: Optional[str] = encoding
+        self.interpolate: bool = interpolate
+        self.single_quotes_expand: bool = single_quotes_expand
+        self.override: bool = override
+
+    @contextmanager
+    def _get_stream(self) -> Iterator[IO[str]]:
+        if self.dotenv_path and os.path.isfile(self.dotenv_path):
+            with open(self.dotenv_path, encoding=self.encoding) as stream:
+                yield stream
+        elif self.stream is not None:
+            yield self.stream
+        else:
+            if self.verbose:
+                logger.info(
+                    "Could not find environment configuration file %s.",
+                    self.dotenv_path or ".env",
+                )
+            yield io.StringIO("")
+
+    def dict(self) -> Dict[str, Optional[str]]:
+        """Return dotenv as dict"""
+        if self._dict:
+            return self._dict
+
+        if self.interpolate:
+            bindings = self.parse_to_bindings()
+            self._dict = OrderedDict(
+                _resolve_bindings(
+                    bindings,
+                    override=self.override,
+                    single_quotes_expand=self.single_quotes_expand,
+                )
+            )
+        else:
+            raw_values = self.parse()
+            self._dict = OrderedDict(raw_values)
+
+        return self._dict
+
+    def parse_to_bindings(self) -> Iterator[Binding]:
+        with self._get_stream() as stream:
+            for mapping in with_warn_for_invalid_lines(parse_stream(stream)):
+                if mapping.key is not None:
+                    yield mapping
+
+    def parse(self) -> Iterator[Tuple[str, Optional[str]]]:
+        for mapping in self.parse_to_bindings():
+            assert mapping.key is not None
+            yield mapping.key, (
+                "".join([v.value for v in mapping.value]) if mapping.value is not None else None
+            )
+
+    def set_as_environment_variables(self) -> bool:
+        """
+        Load the current dotenv as system environment variable.
+        """
+        if not self.dict():
+            return False
+
+        for k, v in self.dict().items():
+            key_present = k in os.environ or (os.name == "nt" and k.upper() in os.environ)
+            if key_present and not self.override:
+                continue
+            if v is not None:
+                os.environ[k] = v
+
+        return True
+
+
+def _resolve_bindings(
+    bindings: Iterable[Binding],
+    override: bool,
+    single_quotes_expand: bool,
+) -> Mapping[str, Optional[str]]:
+    new_values: Dict[str, Optional[str]] = {}
+
+    for binding in bindings:
+        name = binding.key
+        if name is None:
+            continue
+
+        result: Optional[str] = None
+        if binding.value is not None:
+            result = ""
+            for quote, value in binding.value:
+                if not single_quotes_expand and quote == "'":
+                    result += value
+                else:
+                    result += resolve_variable(value, new_values, override)
+
+        new_values[name] = result
+
+    return new_values
+
+
+def resolve_variables(
+    values: Iterable[Tuple[str, Optional[str]]],
+    override: bool,
+) -> Mapping[str, Optional[str]]:
+    """
+    Expand POSIX variables present in the provided sequence of key-value pairs.
+
+    Resolved `values` and `os.environ` are used as defined variables.
+    New values take precedence over `os.environ` if `override` is True.
+    """
+    new_values: Dict[str, Optional[str]] = {}
+
+    for name, value in values:
+        new_values[name] = resolve_variable(value, new_values, override)
+
+    return new_values
+
+
+@overload
+def resolve_variable(value: str, variables: Dict[str, Optional[str]], override: bool) -> str: ...
+
+
+@overload
+def resolve_variable(value: None, variables: Dict[str, Optional[str]], override: bool) -> None: ...
+
+
+def resolve_variable(
+    value: Optional[str], variables: Dict[str, Optional[str]], override: bool
+) -> Optional[str]:
+    """
+    Expand POSIX variables present in the provided value.
+
+    `variables` and `os.environ` are used as defined variables.
+    `variables` take precedence over `os.environ` if `override` is True.
+    """
+    if value is None:
+        return value
+
+    atoms = parse_variables(value)
+    env: Dict[str, Optional[str]] = {}
+    if override:
+        env.update(os.environ)  # type: ignore
+        env.update(variables)
+    else:
+        env.update(variables)
+        env.update(os.environ)  # type: ignore
+    return "".join(atom.resolve(env) for atom in atoms)
+
+
+def _walk_to_root(start_path: str) -> Iterator[str]:
+    """
+    Yield directories starting from the given directory up to the root
+    """
+    if not os.path.exists(start_path):
+        print(start_path)
+        raise IOError("Starting path not found")
+
+    if os.path.isfile(start_path):
+        start_path = os.path.dirname(start_path)
+
+    last_dir = None
+    current_dir = os.path.abspath(start_path)
+    while last_dir != current_dir:
+        yield current_dir
+        parent_dir = os.path.abspath(os.path.join(current_dir, os.path.pardir))
+        last_dir, current_dir = current_dir, parent_dir
+
+
+def find_dotenv(
+    filename: str = ".env",
+    raise_error_if_not_found: bool = False,
+    usecwd: bool = False,
+) -> str:
+    """
+    Search in increasingly higher folders for the given file
+
+    Returns path to the file if found, or an empty string otherwise
+    """
+
+    def _is_interactive():
+        """Decide whether this is running in a REPL or IPython notebook"""
+        try:
+            main = __import__("__main__", None, None, fromlist=["__file__"])
+        except ModuleNotFoundError:
+            return False
+        return not hasattr(main, "__file__")
+
+    if usecwd or _is_interactive() or getattr(sys, "frozen", False):
+        # Should work without __file__, e.g. in REPL or IPython notebook.
+        path = os.getcwd()
+    else:
+        # will work for .py files
+        frame = sys._getframe()
+        current_file = __file__
+
+        while frame.f_code.co_filename == current_file or not os.path.exists(
+            frame.f_code.co_filename
+        ):
+            if frame.f_back is None:
+                break
+            frame = frame.f_back
+        frame_filename = frame.f_code.co_filename
+        # frame_filename can be "<stdin>"" and the line below then resolves to the current working directory
+        path = os.path.dirname(os.path.abspath(frame_filename))
+
+    for dirname in _walk_to_root(path):
+        check_path = os.path.join(dirname, filename)
+        if os.path.isfile(check_path):
+            return check_path
+
+    if raise_error_if_not_found:
+        raise IOError("File not found")
+
+    return ""
+
+
+def load_dotenv(
+    dotenv_path: Optional[StrPath] = None,
+    stream: Optional[IO[str]] = None,
+    verbose: bool = False,
+    override: bool = False,
+    interpolate: bool = True,
+    single_quotes_expand: bool = True,
+    encoding: Optional[str] = "utf-8",
+) -> bool:
+    """Parse a .env file and then load all the variables found as environment variables.
+
+    Parameters:
+        dotenv_path: Absolute or relative path to .env file.
+        stream: Text stream (such as `io.StringIO`) with .env content, used if
+            `dotenv_path` is `None`.
+        verbose: Whether to output a warning the .env file is missing.
+        override: Whether to override the system environment variables with the variables
+            from the `.env` file.
+        encoding: Encoding to be used to read the file.
+    Returns:
+        Bool: True if at least one environment variable is set else False
+
+    If both `dotenv_path` and `stream` are `None`, `find_dotenv()` is used to find the
+    .env file.
+    """
+    if dotenv_path is None and stream is None:
+        dotenv_path = find_dotenv()
+
+    dotenv = DotEnv(
+        dotenv_path=dotenv_path,
+        stream=stream,
+        verbose=verbose,
+        interpolate=interpolate,
+        single_quotes_expand=single_quotes_expand,
+        override=override,
+        encoding=encoding,
+    )
+    return dotenv.set_as_environment_variables()
+
+
+def dotenv_values(
+    dotenv_path: Optional[StrPath] = None,
+    stream: Optional[IO[str]] = None,
+    verbose: bool = False,
+    interpolate: bool = True,
+    single_quotes_expand: bool = True,
+    encoding: Optional[str] = "utf-8",
+) -> Dict[str, Optional[str]]:
+    """
+    Parse a .env file and return its content as a dict.
+
+    The returned dict will have `None` values for keys without values in the .env file.
+    For example, `foo=bar` results in `{"foo": "bar"}` whereas `foo` alone results in
+    `{"foo": None}`
+
+    Parameters:
+        dotenv_path: Absolute or relative path to the .env file.
+        stream: `StringIO` object with .env content, used if `dotenv_path` is `None`.
+        verbose: Whether to output a warning if the .env file is missing.
+        encoding: Encoding to be used to read the file.
+
+    If both `dotenv_path` and `stream` are `None`, `find_dotenv()` is used to find the
+    .env file.
+    """
+    if dotenv_path is None and stream is None:
+        dotenv_path = find_dotenv()
+
+    return DotEnv(
+        dotenv_path=dotenv_path,
+        stream=stream,
+        verbose=verbose,
+        interpolate=interpolate,
+        single_quotes_expand=single_quotes_expand,
+        override=True,
+        encoding=encoding,
+    ).dict()

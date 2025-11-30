@@ -21,8 +21,6 @@ dependencies = [
     "termcolor",
     "aiohttp",
     "psutil",
-    #"python-dotenv",
-    "python-dotenv @ git+https://github.com/Bajron/python-dotenv.git@v1.1.0",
 ]
 [project.optional-dependencies]
 dev = ["black", "pytest", "pytest-cov", "mypy", "types-PyYAML", "types-psutil"]

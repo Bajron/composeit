@@ -1,4 +1,3 @@
-import dotenv
 import io
 from time import strftime, localtime
 import datetime
@@ -6,6 +5,8 @@ import traceback
 import re
 import collections.abc
 from typing import Mapping, Dict, Union, Optional
+
+from .dotenv.main import resolve_variables
 
 
 def make_int(s: Optional[str]):
@@ -126,7 +127,7 @@ def resolve_string(s: str) -> str:
     # This requires handling equal signs inside?
     # expand = dotenv.dotenv_values(stream=io.StringIO(f'X="{anti_variable}"'))["X"]
 
-    expand = dotenv.main.resolve_variables([("H", f"{anti_variable}")], override=True)["H"]
+    expand = resolve_variables([("H", f"{anti_variable}")], override=True)["H"]
     assert expand is not None
     return expand.replace("<<dolar>>", "$")
 

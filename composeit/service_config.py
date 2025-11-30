@@ -3,13 +3,14 @@ import logging
 import os
 import sys
 import shutil
-import dotenv
 import io
 import yaml
 import copy
 from pathlib import Path
-from .utils import update_dict
 from typing import Union, List, Optional, Dict, overload
+
+from .dotenv import dotenv_values
+from .utils import update_dict
 
 
 class ServiceFiles:
@@ -175,7 +176,7 @@ def get_environment(
     Handles: "inherit_environment", "env_file", "environment"
     """
     if config.get("inherit_environment", True):
-        env = None
+        env: Optional[Dict[str, str]] = None
     else:
         # TODO: minimal viable env
         if sys.platform == "win32":
@@ -196,7 +197,7 @@ def get_environment(
             env.update(
                 {
                     k: v if v is not None else os.environ.get(k, "")
-                    for k, v in dotenv.dotenv_values(f).items()
+                    for k, v in dotenv_values(f).items()
                 }
             )
 
@@ -226,7 +227,7 @@ def get_dict_from_env_list(
         elif isinstance(e, str):
             try:
                 # Strings are already interpolated during resolve phase
-                return dotenv.dotenv_values(stream=io.StringIO(e), interpolate=False)
+                return dotenv_values(stream=io.StringIO(e), interpolate=False)
             except Exception as ex:
                 logger.warning(f"Error parsing environment element ({e}): {ex}")
                 return {}
