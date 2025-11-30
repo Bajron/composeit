@@ -40,10 +40,12 @@ ignore_missing_imports = true # TODO: Improve on this some day
 addopts = "--cov=composeit --cov-report html --cov-report term"
 
 [tool.coverage.paths]
-source = ["../composeit", "*/site-packages/composeit"]
+source = ["../composeit", "composeit", "*/site-packages/composeit"]
 
 [tool.coverage.run]
-source = ["composeit", "."]
+patch = ["subprocess"]
+parallel = true
+source = ["../composeit", "composeit", "."]
 concurrency = ["multiprocessing"]
 
 [tool.coverage.report]
