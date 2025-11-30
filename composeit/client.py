@@ -7,7 +7,7 @@ import signal
 import time
 import asyncio
 import aiohttp
-from aiohttp import ClientConnectorError, ClientResponseError
+from aiohttp import ClientConnectorError, ClientResponseError, ClientTimeout, ClientWSTimeout
 from socket import gethostname
 
 from typing import List, Dict, Optional, Callable
@@ -409,7 +409,8 @@ class ComposeProxy:
 
     def make_server_check(self):
         async def client_session(session: aiohttp.ClientSession):
-            async with session.get(f"/", timeout=5) as response:
+            t = ClientTimeout(total=5, sock_connect=5)
+            async with session.get(f"/", timeout=t) as response:
                 return await response.json()
 
         return client_session
@@ -651,7 +652,7 @@ class ComposeClient:
         return self.session.get(
             f"/{project}/{service}/logs",
             params=params,
-            timeout=0,
+            timeout=ClientTimeout(total=0),
         )
 
     async def open_logs(
@@ -670,7 +671,7 @@ class ComposeClient:
         return self.session.get(
             f"/{project}/logs",
             params=params,
-            timeout=0,
+            timeout=ClientTimeout(total=0),
         )
 
     async def attach_to_service(self, service: str, context: bool):
@@ -678,5 +679,5 @@ class ComposeClient:
         return self.session.ws_connect(
             f"/{project}/{service}/attach",
             params={"format": "json", "context": "on" if context else "no"},
-            timeout=0,
+            timeout=ClientWSTimeout(ws_receive=0, ws_close=5),
         )

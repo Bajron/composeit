@@ -23,8 +23,7 @@ class Atom(metaclass=ABCMeta):
         return not result
 
     @abstractmethod
-    def resolve(self, env: Mapping[str, Optional[str]]) -> str:
-        ...
+    def resolve(self, env: Mapping[str, Optional[str]]) -> str: ...
 
 
 class Literal(Atom):

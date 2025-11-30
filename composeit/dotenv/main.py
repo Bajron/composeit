@@ -92,9 +92,9 @@ class DotEnv:
     def parse(self) -> Iterator[Tuple[str, Optional[str]]]:
         for mapping in self.parse_to_bindings():
             assert mapping.key is not None
-            yield mapping.key, "".join(
-                [v.value for v in mapping.value]
-            ) if mapping.value is not None else None
+            yield mapping.key, (
+                "".join([v.value for v in mapping.value]) if mapping.value is not None else None
+            )
 
     def set_as_environment_variables(self) -> bool:
         """
@@ -158,13 +158,11 @@ def resolve_variables(
 
 
 @overload
-def resolve_variable(value: str, variables: Dict[str, Optional[str]], override: bool) -> str:
-    ...
+def resolve_variable(value: str, variables: Dict[str, Optional[str]], override: bool) -> str: ...
 
 
 @overload
-def resolve_variable(value: None, variables: Dict[str, Optional[str]], override: bool) -> None:
-    ...
+def resolve_variable(value: None, variables: Dict[str, Optional[str]], override: bool) -> None: ...
 
 
 def resolve_variable(
