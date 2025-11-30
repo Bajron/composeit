@@ -176,7 +176,7 @@ def get_environment(
     Handles: "inherit_environment", "env_file", "environment"
     """
     if config.get("inherit_environment", True):
-        env = None
+        env: Optional[Dict[str, str]] = None
     else:
         # TODO: minimal viable env
         if sys.platform == "win32":
